@@ -464,6 +464,7 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 				streamReader = wire.TextToolStreamReader(streamReader, upstreamRoute.Protocol)
 			}
 			streamBody := wire.RenameStreamReader(streamReader, upstreamRoute.Protocol, toolRenames)
+			streamBody = wire.NewKeepAliveReader(r.Context(), streamBody, time.Duration(g.cfg.Performance.StreamKeepaliveSeconds)*time.Second)
 			var usage wire.Usage
 			var usageReported bool
 			if external == upstreamRoute.Protocol {
