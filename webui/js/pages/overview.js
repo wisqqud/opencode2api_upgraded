@@ -1,6 +1,6 @@
 // Page: 概览 — readiness checklist, metrics, resources and token usage.
 import * as store from "../store.js";
-import { $, bindTabs, el, emptyRow, formatNumber, timeOnly } from "../ui.js";
+import { $, $$, bindTabs, el, emptyRow, formatNumber, timeOnly } from "../ui.js";
 import { t, onChange } from "../i18n.js";
 
 function renderChecklist() {
@@ -231,12 +231,293 @@ function renderUsage(monitor) {
   renderTiers(usage);
 }
 
+// Statistic tab: durable lifetime totals, a year heatmap, a daily trend and
+// model bars. The server persists the aggregates in statistics.json.
+const compactTokens = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+const statDayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const statMonthFormat = new Intl.DateTimeFormat("en-US", { month: "short" });
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let heatmapMode = "daily";
+let trendRange = 7;
+let heatmapCells = [];
+let trendRangeBuilt = 0;
+const modelRowParts = new Map();
+
+function isoDay(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+function dayTotals(stats) {
+  const totals = new Map();
+  (stats.days || []).forEach((day) => totals.set(day.date, day.tokens?.total_tokens || 0));
+  return totals;
+}
+
+// Counts up to target unless it is already shown; a newer call invalidates the
+// previous animation so a poll cannot land a stale final value.
+function animateNumber(node, target, format = formatNumber) {
+  target = Number(target || 0);
+  if (node.dataset.target === String(target)) return;
+  const from = Number(node.dataset.target || 0);
+  node.dataset.target = String(target);
+  if (reducedMotion()) {
+    node.textContent = format(target);
+    return;
+  }
+  const sequence = (node.animationSequence = (node.animationSequence || 0) + 1);
+  const started = performance.now();
+  const step = (now) => {
+    if (node.animationSequence !== sequence) return;
+    const progress = Math.min(1, (now - started) / 650);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    node.textContent = format(Math.round(from + (target - from) * eased));
+    if (progress < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function renderStatMetrics(stats, entrance) {
+  const lifetime = stats.lifetime || {};
+  const total = lifetime.total_tokens || 0;
+  $("#stat-empty").hidden = total > 0;
+  if (entrance) {
+    ["s-total", "s-peak", "s-sessions", "s-current", "s-longest"].forEach((id) => {
+      const node = $(`#${id}`);
+      node.dataset.target = "0";
+      node.textContent = "0";
+    });
+  }
+  animateNumber($("#s-total"), total, (value) => compactTokens.format(value));
+  animateNumber($("#s-peak"), stats.peak_tokens || 0, (value) => compactTokens.format(value));
+  animateNumber($("#s-sessions"), stats.useful_sessions || 0);
+  animateNumber($("#s-current"), stats.current_streak || 0);
+  animateNumber($("#s-longest"), stats.longest_streak || 0);
+  $("#s-peak-note").textContent = stats.peak_day
+    ? `${statDayFormat.format(new Date(`${stats.peak_day}T00:00:00`))} · busiest day`
+    : "Busiest day";
+}
+
+function levelScale(values) {
+  const sorted = values.filter((value) => value > 0).sort((a, b) => a - b);
+  if (!sorted.length) return () => 0;
+  const at = (percentile) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * percentile))];
+  const thresholds = [at(0.25), at(0.5), at(0.75)];
+  return (value) =>
+    value <= 0 ? 0 : value <= thresholds[0] ? 1 : value <= thresholds[1] ? 2 : value <= thresholds[2] ? 3 : 4;
+}
+
+function buildHeatmap() {
+  const host = $("#token-heatmap");
+  const months = $("#heatmap-months");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(start.getDate() - 364);
+  start.setDate(start.getDate() - start.getDay());
+  const cells = [];
+  const labels = [];
+  let week = -1;
+  let previousMonth = -1;
+  for (
+    let cursor = new Date(start);
+    cursor <= today || cells.length % 7 !== 0;
+    cursor.setDate(cursor.getDate() + 1)
+  ) {
+    if (cells.length % 7 === 0) {
+      week++;
+      if (cursor <= today && cursor.getMonth() !== previousMonth) {
+        labels.push({ week, label: statMonthFormat.format(cursor) });
+        previousMonth = cursor.getMonth();
+      }
+    }
+    const valid = cursor <= today;
+    cells.push({ date: valid ? isoDay(cursor) : "", node: el("i", { class: "heat-cell" }) });
+  }
+  host.replaceChildren();
+  for (let index = 0; index < cells.length; index += 7) {
+    const column = el("div", { class: "heatmap-week" });
+    cells.slice(index, index + 7).forEach((cell) => column.append(cell.node));
+    host.append(column);
+  }
+  cells.forEach((cell, index) => cell.node.style.setProperty("--i", index));
+  months.replaceChildren();
+  months.style.gridTemplateColumns = `repeat(${cells.length / 7}, minmax(0, 1fr))`;
+  labels.forEach((item) => {
+    const label = el("span", { text: item.label });
+    label.style.gridColumn = String(item.week + 1);
+    months.append(label);
+  });
+  heatmapCells = cells;
+}
+
+function renderHeatmap(stats, entrance) {
+  const host = $("#token-heatmap");
+  const todayKey = isoDay(new Date());
+  if (!heatmapCells.length || host.dataset.day !== todayKey) {
+    buildHeatmap();
+    host.dataset.day = todayKey;
+    entrance = true;
+  }
+  const totals = dayTotals(stats);
+  const values = heatmapCells.map((cell) => (cell.date ? totals.get(cell.date) || 0 : 0));
+  if (heatmapMode === "weekly") {
+    for (let index = 0; index < heatmapCells.length; index += 7) {
+      let sum = 0;
+      for (let offset = index; offset < Math.min(index + 7, heatmapCells.length); offset++) {
+        sum += values[offset];
+      }
+      for (let offset = index; offset < Math.min(index + 7, heatmapCells.length); offset++) {
+        values[offset] = sum;
+      }
+    }
+  } else if (heatmapMode === "cumulative") {
+    let running = 0;
+    heatmapCells.forEach((cell, index) => {
+      running += values[index];
+      values[index] = cell.date ? running : 0;
+    });
+  }
+  const level = levelScale(values);
+  heatmapCells.forEach((cell, index) => {
+    cell.node.dataset.level = String(level(values[index]));
+    cell.node.classList.toggle("is-today", cell.date === todayKey);
+    cell.node.title = cell.date ? `${cell.date} · ${formatNumber(values[index])} tokens` : "";
+  });
+  const active = heatmapCells.filter((cell) => cell.date && (totals.get(cell.date) || 0) > 0).length;
+  const windowTotal = heatmapCells.reduce(
+    (sum, cell) => sum + (cell.date ? totals.get(cell.date) || 0 : 0),
+    0,
+  );
+  $("#heatmap-caption").textContent = active
+    ? `${formatNumber(windowTotal)} tokens across ${active} active days`
+    : "No activity in this range yet.";
+  if (entrance) {
+    host.classList.remove("is-entering");
+    void host.offsetWidth;
+    host.classList.add("is-entering");
+  }
+}
+
+function renderStatTrend(stats, entrance) {
+  const host = $("#stat-trend");
+  const totals = dayTotals(stats);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = [];
+  for (let offset = trendRange - 1; offset >= 0; offset--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - offset);
+    days.push({
+      date: isoDay(date),
+      total: totals.get(isoDay(date)) || 0,
+      label: statDayFormat.format(date),
+    });
+  }
+  if (trendRangeBuilt !== trendRange) {
+    trendRangeBuilt = trendRange;
+    host.replaceChildren();
+    days.forEach((day, index) => {
+      const bar = el("div", { class: "stat-bar" });
+      const label = el("span", { class: "stat-x", text: day.label });
+      if (trendRange > 7 && index % 5 !== 0 && index !== days.length - 1) {
+        label.classList.add("empty");
+        label.textContent = day.label;
+      }
+      host.append(el("div", { class: "stat-col" }, [el("div", { class: "stat-barwrap" }, [bar]), label]));
+    });
+    entrance = true;
+  }
+  const columns = [...host.children];
+  const maximum = Math.max(1, ...days.map((day) => day.total));
+  days.forEach((day, index) => {
+    const bar = columns[index]?.querySelector(".stat-bar");
+    if (!bar) return;
+    const height = day.total > 0 ? Math.max(2, (day.total / maximum) * 100) : 0;
+    bar.title = `${day.label} · ${formatNumber(day.total)} tokens`;
+    if (entrance) {
+      bar.style.height = "0%";
+      requestAnimationFrame(() => {
+        bar.style.height = `${height}%`;
+      });
+    } else {
+      bar.style.height = `${height}%`;
+    }
+  });
+  const sum = days.reduce((total, day) => total + day.total, 0);
+  $("#stat-trend-caption").textContent = `${formatNumber(sum)} tokens · last ${trendRange} days · peak ${compactTokens.format(maximum)}`;
+}
+
+function renderStatModels(stats, entrance) {
+  const host = $("#stat-models");
+  const models = stats.models || [];
+  if (!models.length) {
+    modelRowParts.clear();
+    host.replaceChildren(el("div", { class: "empty", text: "No token usage recorded yet." }));
+    return;
+  }
+  const total = Math.max(1, stats.lifetime?.total_tokens || 0);
+  const rows = [];
+  models.slice(0, 10).forEach((model) => {
+    let parts = modelRowParts.get(model.model);
+    if (!parts) {
+      const fill = el("div", { class: "model-fill" });
+      const value = el("span", { class: "model-value" });
+      const share = el("span", { class: "model-share" });
+      const requests = el("span", { class: "model-requests" });
+      const row = el("div", { class: "model-row" }, [
+        el("span", { class: "model-name mono", text: model.model || "unknown" }),
+        el("div", { class: "model-track" }, [fill]),
+        value,
+        share,
+        requests,
+      ]);
+      parts = { row, fill, value, share, requests };
+      modelRowParts.set(model.model, parts);
+    }
+    const tokens = model.total_tokens || 0;
+    const width = Math.min(100, (tokens / total) * 100);
+    parts.value.textContent = `${compactTokens.format(tokens)} tok`;
+    parts.share.textContent = `${Math.round(width)}%`;
+    parts.requests.textContent = `${formatNumber(model.requests || 0)} req`;
+    parts.row.title = `${model.model} · ${formatNumber(tokens)} tokens · ${formatNumber(model.requests || 0)} requests`;
+    if (entrance) {
+      parts.fill.style.width = "0%";
+      requestAnimationFrame(() => {
+        parts.fill.style.width = `${width}%`;
+      });
+    } else {
+      parts.fill.style.width = `${width}%`;
+    }
+    rows.push(parts.row);
+  });
+  host.replaceChildren(...rows);
+}
+
+// `/api/monitor` nests the snapshot under `metrics`, like `usage` and
+// `upstream` are promoted beside it.
+const statisticsOf = (monitor) => monitor?.metrics?.statistics;
+
+function renderStatistic(stats, entrance = false) {
+  if (!stats) return;
+  renderStatMetrics(stats, entrance);
+  renderHeatmap(stats, entrance);
+  renderStatTrend(stats, entrance);
+  renderStatModels(stats, entrance);
+}
+
 function render() {
   renderChecklist();
   const monitor = store.get("monitor");
   if (!monitor) return;
   renderSummary(monitor);
   renderUsage(monitor);
+  renderStatistic(statisticsOf(monitor));
 }
 
 export default {
@@ -244,7 +525,25 @@ export default {
   title: "概览",
   sub: "运行指标、Token 用量与资源状态。",
   init() {
-    bindTabs($("#page-overview"));
+    bindTabs($("#page-overview"), (id) => {
+      if (id === "statistic") renderStatistic(statisticsOf(store.get("monitor")), true);
+    });
+    $$("[data-heatmap-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        heatmapMode = button.dataset.heatmapMode;
+        $$("[data-heatmap-mode]").forEach((item) => item.classList.toggle("active", item === button));
+        const stats = statisticsOf(store.get("monitor"));
+        if (stats) renderHeatmap(stats);
+      });
+    });
+    $$("[data-trend-range]").forEach((button) => {
+      button.addEventListener("click", () => {
+        trendRange = Number(button.dataset.trendRange);
+        $$("[data-trend-range]").forEach((item) => item.classList.toggle("active", item === button));
+        const stats = statisticsOf(store.get("monitor"));
+        if (stats) renderStatTrend(stats);
+      });
+    });
     store.on("monitor", render);
     store.on("config", renderChecklist);
     onChange(render);

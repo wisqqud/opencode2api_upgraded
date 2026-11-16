@@ -45,8 +45,61 @@ type Config struct {
 	WebUI             WebUIConfig                  `json:"webui"`
 	Prefer            Tier                         `json:"prefer"`
 	Reasoning         ReasoningConfig              `json:"reasoning"`
+	Prompt            PromptConfig                 `json:"prompt"`
 
 	effectiveProxies []string
+}
+
+// PromptConfig customizes the system prompt the gateway prepends to shaped
+// free-tier requests. Every part is optional: a part without its Custom flag
+// uses the built-in wording, so the zero value keeps the original behavior.
+// Disabled turns injection off entirely, which the upstream may reject because
+// the free tier expects an agent-shaped body.
+//
+// The base prompts keep the 1.x (v1) and 2.x (v2) tool names the lanes expect;
+// both use the Windows environment. Environment is a template rendered with
+// {{model}}, {{cwd}}, {{workspace}}, {{git}}, {{platform}}, and {{date}}.
+type PromptConfig struct {
+	Disabled          bool   `json:"disabled,omitempty"`
+	CustomBaseV1      bool   `json:"custom_base_v1,omitempty"`
+	BaseV1            string `json:"base_v1,omitempty"`
+	CustomBaseV2      bool   `json:"custom_base_v2,omitempty"`
+	BaseV2            string `json:"base_v2,omitempty"`
+	CustomEnvironment bool   `json:"custom_environment,omitempty"`
+	Environment       string `json:"environment,omitempty"`
+	CustomSkills      bool   `json:"custom_skills,omitempty"`
+	Skills            string `json:"skills,omitempty"`
+	Extra             string `json:"extra,omitempty"`
+}
+
+// Bounds keep a configuration from carrying an unbounded prompt; the upstream
+// request budget is the real limit, and these are generous multiples of the
+// built-in text.
+const (
+	promptMaxBase        = 256 << 10
+	promptMaxEnvironment = 64 << 10
+	promptMaxSkills      = 64 << 10
+	promptMaxExtra       = 128 << 10
+)
+
+// Normalize validates the optional prompt overrides. Prompt text is preserved
+// byte for byte because whitespace is part of the wording.
+func (p *PromptConfig) Normalize() error {
+	for name, value := range map[string]struct {
+		text string
+		max  int
+	}{
+		"prompt.base_v1":     {p.BaseV1, promptMaxBase},
+		"prompt.base_v2":     {p.BaseV2, promptMaxBase},
+		"prompt.environment": {p.Environment, promptMaxEnvironment},
+		"prompt.skills":      {p.Skills, promptMaxSkills},
+		"prompt.extra":       {p.Extra, promptMaxExtra},
+	} {
+		if len(value.text) > value.max {
+			return fmt.Errorf("%s must not exceed %d KiB", name, value.max>>10)
+		}
+	}
+	return nil
 }
 
 // ReasoningConfig forces a thinking level for requests that do not state one.
@@ -82,6 +135,11 @@ type WarpConfig struct {
 	// replacement exit a new public egress; without it, exits share one
 	// address and an egress-scoped free quota stays exhausted.
 	SourceIPv6 string `json:"source_ipv6,omitempty"`
+	// ConnectVia, when set, is a SOCKS5 proxy ("host:port" or a socks5:// URL)
+	// that WARP uses for both the registration request and the WireGuard UDP
+	// handshake. It lets a host whose direct route to Cloudflare's endpoint is
+	// blocked still raise the tunnel. The proxy must support UDP ASSOCIATE.
+	ConnectVia string `json:"connect_via,omitempty"`
 }
 
 // Normalize fills the defaults and canonicalizes the stack name.
@@ -113,6 +171,17 @@ func (w *WarpConfig) Normalize() error {
 			return errors.New("warp.source_ipv6 requires warp.stack to be \"ipv6\"; an IPv4 stack cannot present an IPv6 egress")
 		}
 		w.SourceIPv6 = prefix.Masked().String()
+	}
+	w.ConnectVia = strings.TrimSpace(w.ConnectVia)
+	if w.ConnectVia != "" {
+		if w.SourceIPv6 != "" {
+			return errors.New("warp.source_ipv6 cannot be combined with warp.connect_via: the proxy picks the outer source")
+		}
+		normalized, err := warp.NormalizeConnectVia(w.ConnectVia)
+		if err != nil {
+			return fmt.Errorf("warp.connect_via: %w", err)
+		}
+		w.ConnectVia = normalized
 	}
 	return nil
 }
@@ -439,6 +508,9 @@ func Normalize(path string, cfg Config) (Config, error) {
 		}
 	}
 	if err := normalizeReasoning(&cfg); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.Prompt.Normalize(); err != nil {
 		return Config{}, err
 	}
 	if err := normalizeProxyBindings(&cfg); err != nil {

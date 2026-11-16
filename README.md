@@ -254,9 +254,13 @@ The tunnel lives inside the gateway process: it registers a WARP device, speaks 
 
 The upstream free quota is scoped to the egress block, so rotation only helps when a replacement leaves from a different one: an IPv6 exit is keyed and cooled by its `/64` for 30 minutes, an IPv4 exit by its `/32`. Cloudflare's WARP IPv4 egress is usually one shared NAT address, which other users routinely exhaust; the IPv6 stack gets an egress derived from the outer WireGuard source. Set `warp.source_ipv6` to an IPv6 prefix routed to the host (usually a `/64`), with the default `ipv6` stack to make every exit bind its own source address from that prefix. The prefix needs `IPV6_FREEBIND` on Linux (the gateway sets it) or addresses already assigned to an interface. Endpoint family is not probed in advance: the handshake tries IPv6 endpoints first and falls back to IPv4 ones when none answer (the exit then egresses from the shared address). Leave `source_ipv6` empty to keep the host's default source address. On networks whose WARP egress pool is saturated every fresh exit can still answer 429; the gateway then churns exits without ever surfacing a 429 before the attempt budget is spent. `/healthz` reports a `warp` block and answers 503 while WARP is enabled but no exit is active; `no_healthy_proxies` only blocks readiness when WARP is off or Go keys need proxies. Diagnostics acquire an exit but never rotate or penalize it. Turning WARP off restores proxy routing for the free lanes.
 
+On a host whose direct route to Cloudflare's endpoint is blocked, set `warp.connect_via` to a SOCKS5 proxy — for example Cloudflare WARP's own `proxy` mode at `127.0.0.1:40000`. The proxy then carries both the registration request and the WireGuard UDP handshake, so the tunnel can still come up. It must support UDP ASSOCIATE, because an HTTP CONNECT proxy cannot carry the datagrams. `connect_via` replaces the outer IPv6 source rotation, so `warp.source_ipv6` and `warp.connect_via` cannot be set together.
+
 ### Official system prompt
 
-Every shaped free-model request carries the OpenCode CLI's own system prompt — its base instructions, the `<env>` block, and the built-in skill listing — because the free tier validates agent-shaped traffic. The v1 `/zen` lane uses the 1.x tool names; `/inference` and `/zen/go` use the 2.x names. The environment block names the requested model, the gateway's working directory, the platform, and a UTC date.
+Every shaped free-model request carries the OpenCode CLI's own system prompt — its base instructions, the `<env>` block, and the built-in skill listing — because the free tier validates agent-shaped traffic. The v1 `/zen` lane uses the 1.x tool names; `/inference` and `/zen/go` use the 2.x names. This build is Windows-only: the environment names the platform as `win32`, the built-in wording says PowerShell instead of bash, and the shell tool descriptions describe PowerShell. When the client's own system prompt reports a project (`Current working directory`, `Working directory`, `Workspace root folder`, or an `<env>` block, as DSH does), that directory and its git status replace the gateway's process directory; otherwise the gateway's directory is used.
+
+The **Prompt inject** tab in Configuration center customizes each part independently: the v1 and v2 base prompts, the `<env>` template (`{{model}}`, `{{cwd}}`, `{{workspace}}`, `{{git}}`, `{{platform}}`, `{{date}}`), the skill listing, and extra instructions appended last. A part without its Override switch keeps the built-in text, and the tab shows a live preview of the composed prompt. Turning injection off entirely is allowed but the free tier may reject the resulting request.
 
 Injection is protocol-aware: Chat system and developer messages are folded into one leading `system` message, Anthropic receives a `system` value (a string, or a leading text block when the caller sent blocks), and Responses receives `instructions`. A body whose system content already contains the marker `You are opencode, an interactive CLI tool` is passed through, so a client that sends the official prompt never gets a second copy. Free models served by a Zen or Go key receive the same shaping even though they still leave through that tier's proxy.
 
@@ -306,6 +310,7 @@ See [config.example.json](config.example.json) for a complete starting configura
 | `warp.pool_size`            | `2`; upper bound on WARP exits (half pre-registered in the background; the active ring follows concurrency), 1–32. |
 | `warp.stack`                | `ipv6`; `ipv6`, `ipv4`, or `dual`.                                          |
 | `warp.source_ipv6`          | empty; IPv6 prefix (`/64`) each exit binds its outer source from; requires `stack = "ipv6"`. |
+| `warp.connect_via`          | empty; SOCKS5 proxy (`host:port` or `socks5://host:port`) that carries both the registration request and the WireGuard UDP handshake. Needs UDP ASSOCIATE (e.g. Cloudflare WARP's `proxy` mode); cannot be combined with `warp.source_ipv6`. |
 | `prefer`                    | `go`; accepts `go` or `zen`.                                                |
 | `upstream.zen`              | `https://opencode.ai/zen`.                                                  |
 | `upstream.go`               | `https://opencode.ai/zen/go`.                                               |
@@ -484,9 +489,12 @@ Upstream **attempt** records measure the HTTP exchange through receipt of respon
 
 Token statistics use reported usage only. Input tokens include cache reads and writes; cached tokens separately count cache reads. Missing usage is not estimated, and coverage shows how many routed inference requests reported usage. `usage.server_keys` splits requests and tokens by the local server key the caller authenticated with (its fingerprint, as shown in `/api/api-keys`); Playground traffic is counted under `playground`.
 
+The **Statistic** tab in the Operations desk reads durable daily aggregates: cumulative and peak tokens, useful sessions, day streaks, a twelve-month heatmap, a daily trend, and per-model lifetime usage. These totals survive restarts.
+
 | Data                                                      | Storage / retention                                                                          |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Sessions, metrics, token totals, latest Playground result | Process memory; cleared on restart.                                                          |
+| Daily token aggregates for the Statistic tab              | `statistics.json` beside the configuration; written atomically every 15 seconds and on shutdown. |
 | Request and attempt details                               | Recent hour, capped at 10,000 requests and 20,000 attempts; API returns at most 500 of each. |
 | Live log ring                                             | Process memory; size set by `logging.ring_size`.                                             |
 | Structured logs                                           | JSON on stdout; collect externally for durable history.                                      |
@@ -494,7 +502,7 @@ Token statistics use reported usage only. Input tokens include cache reads and w
 | Model directory cache                                     | `config.json.models.catalog.json`.                                                           |
 | Price/deprecation cache                                   | `config.json.models.dev.json`.                                                               |
 
-Cache filenames are based on the actual configuration path. Lifetime counters mean the current process lifetime. Instances do not share sessions or monitoring state.
+Cache filenames are based on the actual configuration path. Lifetime counters in the Summary and Usage views mean the current process lifetime; the Statistic tab's cumulative totals are the durable exception. Instances do not share sessions or monitoring state.
 
 ### Health checks
 

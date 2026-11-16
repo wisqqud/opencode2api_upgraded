@@ -23,6 +23,12 @@
   --bad: #cf222e;
   --bad-bg: #ffebe9;
 
+  --heat-0: #f1f1f1;
+  --heat-1: #dcdcdc;
+  --heat-2: #b9b9b9;
+  --heat-3: #7d7d7d;
+  --heat-4: #1f1f1f;
+
   --font-sans:
     system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
     "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -81,4 +87,10 @@
   --warn-bg: rgba(210, 153, 34, 0.15);
   --bad: #f85149;
   --bad-bg: rgba(248, 81, 73, 0.15);
+
+  --heat-0: #171717;
+  --heat-1: #262626;
+  --heat-2: #3d3d3d;
+  --heat-3: #6e6e6e;
+  --heat-4: #d8d8d8;
 }

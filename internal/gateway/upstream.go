@@ -494,7 +494,7 @@ func (g *Gateway) doAnonymousUpstream(ctx context.Context, route models.Route, b
 	preparedBodies := make([][]byte, len(upstreams))
 	toolRenames := make([]*wire.ToolRenames, len(upstreams))
 	for i, baseURL := range upstreams {
-		preparedBodies[i], toolRenames[i] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL))
+		preparedBodies[i], toolRenames[i] = prepareAnonymousBody(rawBody, protocol, models.IsV1Upstream(baseURL), g.cfg.Prompt)
 	}
 	for proxies < limit {
 		if ctx.Err() != nil {
@@ -696,7 +696,7 @@ func (g *Gateway) inferenceClient(proxy *proxyTransport, baseURL, model string) 
 // (/zen) and v2 lanes. System One payloads are decision requests, not agent
 // traffic, so they are forwarded verbatim, as is a body that is not a JSON
 // object.
-func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool) ([]byte, *wire.ToolRenames) {
+func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool, prompt config.PromptConfig) ([]byte, *wire.ToolRenames) {
 	if protocol == wire.SystemOne {
 		return body, nil
 	}
@@ -712,7 +712,7 @@ func prepareAnonymousBody(body []byte, protocol wire.Protocol, v1 bool) ([]byte,
 	if ensureAnonymousChatUsage(payload, protocol) {
 		changed = true
 	}
-	if injectOfficialPrompt(payload, protocol, v1) {
+	if injectOfficialPrompt(payload, protocol, v1, prompt) {
 		changed = true
 	}
 	var renames *wire.ToolRenames
@@ -904,7 +904,7 @@ func (g *Gateway) shapeKeyBody(body []byte, route models.Route, tier config.Tier
 	if tier == config.TierGo {
 		baseURL = g.cfg.Upstream.Go
 	}
-	shaped, renames := prepareAnonymousBody(body, route.ProtocolFor(tier), models.IsV1Upstream(baseURL))
+	shaped, renames := prepareAnonymousBody(body, route.ProtocolFor(tier), models.IsV1Upstream(baseURL), g.cfg.Prompt)
 	return shaped, renames, !bytes.Equal(shaped, body)
 }
 

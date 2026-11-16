@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -50,7 +51,10 @@ func main() {
 	redactor := config.SecretRedactor()
 	redactor.Replace(cfg)
 	logger := telemetry.StructuredLogger(level, hub, redactor)
+	statistics := telemetry.NewStatistics(filepath.Join(filepath.Dir(*configPath), "statistics.json"))
+	defer statistics.Close()
 	monitor := telemetry.Monitor()
+	monitor.AttachStatistics(statistics)
 	manager, err := gateway.RuntimeManager(ctx, *configPath, cfg, logger, monitor, hub, redactor, level)
 	if err != nil {
 		logger.Error("failed to initialize runtime", "component", "runtime", "event", "runtime_initialization_failed", "error", err)

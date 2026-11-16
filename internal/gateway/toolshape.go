@@ -3,7 +3,6 @@ package gateway
 import (
 	_ "embed"
 	"encoding/json"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -188,22 +187,16 @@ func officialToolset(protocol wire.Protocol, v1 bool) []any {
 	return tools
 }
 
-// v2ShellDescription renders the shell tool description for the host platform.
-// The 2.x client describes the shell it actually has, so a Windows host says
-// powershell where a Unix host says bash.
+// v2ShellDescription renders the shell tool description for the Windows host
+// this gateway targets: the 2.x client describes the shell it actually has, so
+// the Unix wording is replaced with powershell.
 func v2ShellDescription(base string) string {
-	if runtime.GOOS != "windows" {
-		return base
-	}
 	return strings.Replace(base, "on Linux using bash", "on Windows using powershell", 1)
 }
 
-// v1BashDescription applies the same platform rewrite to the 1.x bash
-// definition, which states its OS and shell inline.
+// v1BashDescription applies the same rewrite to the 1.x bash definition, which
+// states its OS and shell inline.
 func v1BashDescription(base string) string {
-	if runtime.GOOS != "windows" {
-		return base
-	}
 	return strings.Replace(base, "OS: linux, Shell: bash", "OS: windows, Shell: powershell", 1)
 }
 

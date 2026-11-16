@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/url"
 	"sync"
 	"time"
 )
@@ -147,6 +148,11 @@ type Options struct {
 	// replacement reaches Cloudflare from a new source and receives a new
 	// public egress — the only way past an egress-scoped free usage limit.
 	SourceIPv6 netip.Prefix
+	// ConnectVia, when set, is a SOCKS5 proxy that carries both the
+	// registration request and the WireGuard UDP handshake. It is used when the
+	// direct route to Cloudflare's endpoint is blocked; the outer IPv6 source
+	// rotation does not apply, because the proxy chooses the route.
+	ConnectVia *url.URL
 }
 
 // NewWithOptions creates a WARP pool whose exits use the selected IP stack and,
@@ -163,20 +169,20 @@ func NewWithOptions(ctx context.Context, log *slog.Logger, opts Options) (*Pool,
 	if size <= 0 {
 		size = DefaultPoolSize
 	}
-	r := newRegistrar()
+	r := newRegistrar(opts.ConnectVia)
 	pool, err := newPool(ctx, slogLogger{log: log}, size, func(ctx context.Context) (*exit, error) {
 		reg, err := r.register(ctx)
 		if err != nil {
 			return nil, err
 		}
 		var source netip.Addr
-		if opts.SourceIPv6.IsValid() {
+		if opts.ConnectVia == nil && opts.SourceIPv6.IsValid() {
 			source, err = randomSource(opts.SourceIPv6)
 			if err != nil {
 				return nil, err
 			}
 		}
-		return newExitWithStack(ctx, reg, normalized, source)
+		return newExitWithStack(ctx, reg, normalized, source, opts.ConnectVia)
 	})
 	if err != nil {
 		return nil, err

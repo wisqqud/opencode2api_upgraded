@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,13 +90,21 @@ type registrar struct {
 	blockedTill time.Time
 }
 
-func newRegistrar() *registrar {
+func newRegistrar(connectVia *url.URL) *registrar {
+	// A SOCKS5 connect-via also carries the registration request, so a host
+	// that cannot reach the Cloudflare API directly still registers. net/http
+	// dials socks5 proxies itself; the scheme is canonicalized by
+	// ParseConnectVia.
+	var proxy func(*http.Request) (*url.URL, error)
+	if connectVia != nil {
+		proxy = http.ProxyURL(connectVia)
+	}
 	return &registrar{
 		base: defaultAPIBase,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
-				Proxy:               nil,
+				Proxy:               proxy,
 				ForceAttemptHTTP2:   false,
 				MaxIdleConns:        4,
 				IdleConnTimeout:     30 * time.Second,

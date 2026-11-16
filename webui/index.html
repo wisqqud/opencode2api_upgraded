@@ -105,6 +105,7 @@
             <div class="tabs" role="tablist" aria-label="概览视图">
               <button class="tab active" data-tab="summary" role="tab" aria-selected="true" data-i18n="overview.tab.summary">概览</button>
               <button class="tab" data-tab="usage" role="tab" aria-selected="false" data-i18n="overview.tab.usage">用量</button>
+              <button class="tab" data-tab="statistic" role="tab" aria-selected="false">Statistic</button>
             </div>
             <div data-panel="summary" class="stack" role="tabpanel">
               <section id="overview-checklist" class="section hidden">
@@ -253,6 +254,94 @@
                   <div id="usage-tiers"></div>
                 </section>
               </div>
+            </div>
+            <div data-panel="statistic" class="stack hidden" role="tabpanel">
+              <p id="stat-empty" class="stat-empty" hidden>
+                No token usage recorded yet. This view fills in as soon as an upstream reports usage.
+              </p>
+              <div class="metrics stat-metrics">
+                <div class="metric">
+                  <div class="metric-label">Cumulative tokens</div>
+                  <div id="s-total" class="metric-value">0</div>
+                  <div class="metric-note">All reported usage</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Peak tokens</div>
+                  <div id="s-peak" class="metric-value">0</div>
+                  <div id="s-peak-note" class="metric-note">Busiest day</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Useful sessions</div>
+                  <div id="s-sessions" class="metric-value">0</div>
+                  <div class="metric-note">Sessions with reported tokens</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Current streak</div>
+                  <div id="s-current" class="metric-value">0</div>
+                  <div class="metric-note">Consecutive active days</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Longest streak</div>
+                  <div id="s-longest" class="metric-value">0</div>
+                  <div class="metric-note">Best run on record</div>
+                </div>
+              </div>
+
+              <section class="section">
+                <div class="section-head">
+                  <div>
+                    <h2 class="section-title">Token activity</h2>
+                    <p class="section-caption">
+                      Every reported token, grouped by day over the last 12 months.
+                    </p>
+                  </div>
+                  <div class="seg" role="group" aria-label="Token activity scale">
+                    <button class="seg-btn active" type="button" data-heatmap-mode="daily">Daily</button>
+                    <button class="seg-btn" type="button" data-heatmap-mode="weekly">Weekly</button>
+                    <button class="seg-btn" type="button" data-heatmap-mode="cumulative">Cumulative</button>
+                  </div>
+                </div>
+                <div class="heatmap-months" id="heatmap-months" aria-hidden="true"></div>
+                <div
+                  class="heatmap"
+                  id="token-heatmap"
+                  role="img"
+                  aria-label="Daily token activity over the last 12 months"
+                ></div>
+                <div class="heatmap-foot">
+                  <span id="heatmap-caption" class="heatmap-caption"></span>
+                  <span class="heatmap-legend" aria-hidden="true">
+                    <span>Less</span>
+                    <i data-level="0"></i><i data-level="1"></i><i data-level="2"></i
+                    ><i data-level="3"></i><i data-level="4"></i>
+                    <span>More</span>
+                  </span>
+                </div>
+              </section>
+
+              <section class="section">
+                <div class="section-head">
+                  <div>
+                    <h2 class="section-title">Daily token trend</h2>
+                    <p id="stat-trend-caption" class="section-caption">Reported tokens per day.</p>
+                  </div>
+                  <div class="seg" role="group" aria-label="Trend range">
+                    <button class="seg-btn active" type="button" data-trend-range="7">Last 7 days</button>
+                    <button class="seg-btn" type="button" data-trend-range="30">Last 30 days</button>
+                  </div>
+                </div>
+                <div id="stat-trend" class="stat-trend"></div>
+              </section>
+
+              <section class="section">
+                <div class="section-head">
+                  <div>
+                    <h2 class="section-title">Model usage</h2>
+                    <p class="section-caption">Lifetime share of reported tokens by model.</p>
+                  </div>
+                </div>
+                <div id="stat-models" class="model-usage"></div>
+              </section>
             </div>
           </section>
 
@@ -809,6 +898,7 @@
                 <button class="tab" data-tab="upstream" role="tab" aria-selected="false" data-i18n="config.tab.upstream">上游与模型</button>
                 <button class="tab" data-tab="reasoning" role="tab" aria-selected="false" data-i18n="config.tab.reasoning">推理与性能</button>
                 <button class="tab" data-tab="logging" role="tab" aria-selected="false" data-i18n="config.tab.logging">日志</button>
+                <button class="tab" data-tab="prompt" role="tab" aria-selected="false">Prompt inject</button>
               </div>
 
               <div data-panel="service" class="stack" role="tabpanel">
@@ -951,6 +1041,13 @@
                       <input id="c-warp-source" placeholder="2001:db8:1::/64" />
                       <p class="section-caption" data-i18n="config.warp.source.hint">
                         仅在使用 IPv6 网络栈时生效。每个 WARP 出口从该前缀取一个源地址出网，换出口即换公网地址；留空则共用本机默认源地址。
+                      </p>
+                    </div>
+                    <div class="field full">
+                      <label for="c-warp-connect" data-i18n="config.warp.connect">连接 WARP 时使用的代理</label>
+                      <input id="c-warp-connect" placeholder="127.0.0.1:40000" />
+                      <p class="section-caption" data-i18n="config.warp.connect.hint">
+                        可选。填 SOCKS5 代理（host:port 或 socks5://host:port），WARP 的注册请求和 WireGuard UDP 都经它出网，适合本机直连 Cloudflare 端点被拦的情况。代理需支持 UDP ASSOCIATE（如 Cloudflare WARP 客户端的 proxy 模式）；填了它就不能再用外层 IPv6 源前缀。
                       </p>
                     </div>
                   </div>
@@ -1143,6 +1240,149 @@
                         </span>
                       </label>
                     </div>
+                  </div>
+                </section>
+              </div>
+
+              <div data-panel="prompt" class="stack hidden" role="tabpanel">
+                <section class="section">
+                  <div class="section-head">
+                    <div>
+                      <h2 class="section-title">Prompt inject</h2>
+                      <p class="section-caption">
+                        Edit the system prompt prepended to free-tier requests. Turn on Override to replace a
+                        built-in part. The environment template supports {{model}}, {{cwd}}, {{workspace}},
+                        {{git}}, {{platform}} and {{date}}.
+                      </p>
+                    </div>
+                    <div class="prompt-head-actions">
+                      <span id="prompt-mode" class="prompt-chip">Official</span>
+                      <button id="prompt-reset" type="button" class="btn btn-sm btn-ghost">Reset all</button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label class="check">
+                      <input id="c-prompt-enabled" type="checkbox" />
+                      <span>Enable prompt injection</span>
+                    </label>
+                    <p class="section-caption">
+                      Turning injection off may make the free tier reject requests: it expects agent-shaped traffic.
+                    </p>
+                  </div>
+                  <div class="prompt-layout">
+                    <div class="prompt-parts">
+                      <article class="prompt-part">
+                        <header class="prompt-part-head">
+                          <div>
+                            <h3 class="prompt-part-title">Base prompt · v1</h3>
+                            <p class="section-caption">OpenCode 1.x tool names for /zen. Windows / PowerShell wording.</p>
+                          </div>
+                          <label class="check prompt-override">
+                            <input type="checkbox" data-prompt-custom="base_v1" />
+                            <span>Override</span>
+                          </label>
+                        </header>
+                        <textarea
+                          id="c-prompt-base-v1"
+                          class="json-editor prompt-editor prompt-editor-lg"
+                          spellcheck="false"
+                        ></textarea>
+                        <footer class="prompt-part-foot">
+                          <span class="prompt-count" data-prompt-count="base_v1">0 chars</span>
+                          <button type="button" class="btn btn-sm btn-ghost" data-prompt-reset="base_v1">Reset</button>
+                        </footer>
+                      </article>
+                      <article class="prompt-part">
+                        <header class="prompt-part-head">
+                          <div>
+                            <h3 class="prompt-part-title">Base prompt · v2</h3>
+                            <p class="section-caption">OpenCode 2.x tool names for /inference and /zen/go. Windows / PowerShell wording.</p>
+                          </div>
+                          <label class="check prompt-override">
+                            <input type="checkbox" data-prompt-custom="base_v2" />
+                            <span>Override</span>
+                          </label>
+                        </header>
+                        <textarea
+                          id="c-prompt-base-v2"
+                          class="json-editor prompt-editor prompt-editor-lg"
+                          spellcheck="false"
+                        ></textarea>
+                        <footer class="prompt-part-foot">
+                          <span class="prompt-count" data-prompt-count="base_v2">0 chars</span>
+                          <button type="button" class="btn btn-sm btn-ghost" data-prompt-reset="base_v2">Reset</button>
+                        </footer>
+                      </article>
+                      <article class="prompt-part">
+                        <header class="prompt-part-head">
+                          <div>
+                            <h3 class="prompt-part-title">Environment block</h3>
+                            <p class="section-caption">Detected from the client system prompt when DSH reports a project; placeholders are filled per request.</p>
+                          </div>
+                          <label class="check prompt-override">
+                            <input type="checkbox" data-prompt-custom="environment" />
+                            <span>Override</span>
+                          </label>
+                        </header>
+                        <textarea
+                          id="c-prompt-environment"
+                          class="json-editor prompt-editor"
+                          spellcheck="false"
+                        ></textarea>
+                        <footer class="prompt-part-foot">
+                          <span class="prompt-count" data-prompt-count="environment">0 chars</span>
+                          <button type="button" class="btn btn-sm btn-ghost" data-prompt-reset="environment">Reset</button>
+                        </footer>
+                      </article>
+                      <article class="prompt-part">
+                        <header class="prompt-part-head">
+                          <div>
+                            <h3 class="prompt-part-title">Skills listing</h3>
+                            <p class="section-caption">The &lt;available_skills&gt; block appended after the environment.</p>
+                          </div>
+                          <label class="check prompt-override">
+                            <input type="checkbox" data-prompt-custom="skills" />
+                            <span>Override</span>
+                          </label>
+                        </header>
+                        <textarea
+                          id="c-prompt-skills"
+                          class="json-editor prompt-editor prompt-editor-sm"
+                          spellcheck="false"
+                        ></textarea>
+                        <footer class="prompt-part-foot">
+                          <span class="prompt-count" data-prompt-count="skills">0 chars</span>
+                          <button type="button" class="btn btn-sm btn-ghost" data-prompt-reset="skills">Reset</button>
+                        </footer>
+                      </article>
+                      <article class="prompt-part">
+                        <header class="prompt-part-head">
+                          <div>
+                            <h3 class="prompt-part-title">Extra instructions</h3>
+                            <p class="section-caption">Appended after everything else, in every lane. Always enabled.</p>
+                          </div>
+                        </header>
+                        <textarea
+                          id="c-prompt-extra"
+                          class="json-editor prompt-editor prompt-editor-sm"
+                          spellcheck="false"
+                        ></textarea>
+                        <footer class="prompt-part-foot">
+                          <span class="prompt-count" data-prompt-count="extra">0 chars</span>
+                          <button type="button" class="btn btn-sm btn-ghost" data-prompt-reset="extra">Clear</button>
+                        </footer>
+                      </article>
+                    </div>
+                    <aside class="prompt-preview-card">
+                      <div class="code-head">
+                        <div class="prompt-preview-tabs" role="tablist" aria-label="Prompt version">
+                          <button type="button" class="prompt-preview-tab active" data-prompt-preview="v1">v1</button>
+                          <button type="button" class="prompt-preview-tab" data-prompt-preview="v2">v2</button>
+                        </div>
+                        <button id="prompt-copy" type="button" class="btn btn-sm btn-ghost">Copy</button>
+                      </div>
+                      <pre id="prompt-preview"></pre>
+                    </aside>
                   </div>
                 </section>
               </div>

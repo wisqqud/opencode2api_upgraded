@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { loadConfig, loadDebugModels } from "../data.js";
 import * as store from "../store.js";
 import { t, onChange } from "../i18n.js";
-import { $, $$, bindTabs, el, openDialog, toast } from "../ui.js";
+import { $, $$, bindTabs, copyText, el, openDialog, toast } from "../ui.js";
 
 // A long proxy list is rendered collapsed: the first CHIP_RENDER_LIMIT chips
 // plus a toggle. A single flex-wrap row with thousands of chips is what froze
@@ -74,6 +74,108 @@ function secretInputs(name) {
 
 const numberValue = (selector) => Number($(selector).value);
 
+// Prompt inject: each part is a built-in default unless its Override checkbox
+// is on. The preview composes exactly what the gateway will prepend.
+const PROMPT_PARTS = {
+  base_v1: { editor: "#c-prompt-base-v1", field: "base_v1", custom: "custom_base_v1" },
+  base_v2: { editor: "#c-prompt-base-v2", field: "base_v2", custom: "custom_base_v2" },
+  environment: { editor: "#c-prompt-environment", field: "environment", custom: "custom_environment" },
+  skills: { editor: "#c-prompt-skills", field: "skills", custom: "custom_skills" },
+};
+const promptPreviewSample = {
+  model: "model-id",
+  cwd: "C:\\Users\\you\\project",
+  workspace: "C:\\Users\\you\\project",
+  git: "yes",
+  platform: "win32",
+  date: new Date().toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  }),
+};
+let promptPreviewVersion = "v1";
+
+const promptDefaults = () => store.get("config")?.prompt_defaults || {};
+
+function promptEditor(part) {
+  return $(PROMPT_PARTS[part].editor);
+}
+
+function promptCustom(part) {
+  return $(`[data-prompt-custom="${part}"]`).checked;
+}
+
+function promptText(part) {
+  return promptEditor(part)?.value || "";
+}
+
+function updatePromptCount(part) {
+  const editor = part === "extra" ? $("#c-prompt-extra") : promptEditor(part);
+  const count = $(`[data-prompt-count="${part}"]`);
+  if (editor && count) count.textContent = `${editor.value.length.toLocaleString("en-US")} chars`;
+}
+
+function setPromptPart(part, custom, text) {
+  const spec = PROMPT_PARTS[part];
+  const checkbox = $(`[data-prompt-custom="${part}"]`);
+  const editor = promptEditor(part);
+  checkbox.checked = !!custom;
+  editor.value = custom ? text || "" : promptDefaults()[spec.field] || "";
+  editor.disabled = !custom;
+  updatePromptCount(part);
+}
+
+function renderPromptPreview() {
+  const enabled = $("#c-prompt-enabled").checked;
+  const chip = $("#prompt-mode");
+  const custom =
+    Object.keys(PROMPT_PARTS).some(promptCustom) || $("#c-prompt-extra").value.trim() !== "";
+  chip.textContent = !enabled ? "Disabled" : custom ? "Custom" : "Built-in";
+  chip.classList.toggle("is-off", !enabled);
+  if (!enabled) {
+    $("#prompt-preview").textContent =
+      "Prompt injection is disabled. Requests go upstream without the injected system prompt.";
+    return;
+  }
+  const base = promptPreviewVersion === "v1" ? promptText("base_v1") : promptText("base_v2");
+  const environment = promptText("environment").replace(
+    /\{\{(\w+)\}\}/g,
+    (match, key) => promptPreviewSample[key] ?? match,
+  );
+  const parts = [base, environment, promptText("skills"), $("#c-prompt-extra").value.trim()];
+  $("#prompt-preview").textContent = parts.filter(Boolean).join("\n\n");
+}
+
+function fillPrompt(value) {
+  const prompt = value.prompt || {};
+  $("#c-prompt-enabled").checked = !prompt.disabled;
+  Object.entries(PROMPT_PARTS).forEach(([part, spec]) => {
+    setPromptPart(part, prompt[spec.custom], prompt[spec.field]);
+  });
+  $("#c-prompt-extra").value = prompt.extra || "";
+  updatePromptCount("extra");
+  renderPromptPreview();
+}
+
+function forcePromptDefaults() {
+  $("#c-prompt-enabled").checked = true;
+  Object.keys(PROMPT_PARTS).forEach((part) => setPromptPart(part, false, ""));
+  $("#c-prompt-extra").value = "";
+  updatePromptCount("extra");
+  renderPromptPreview();
+}
+
+function promptUpdate() {
+  const prompt = { disabled: !$("#c-prompt-enabled").checked, extra: $("#c-prompt-extra").value };
+  Object.entries(PROMPT_PARTS).forEach(([part, spec]) => {
+    prompt[spec.custom] = promptCustom(part);
+    prompt[spec.field] = promptCustom(part) ? promptText(part) : "";
+  });
+  return prompt;
+}
+
 function fillConfig(value) {
   if (!value) return;
   $("#c-listen").value = value.listen;
@@ -87,6 +189,7 @@ function fillConfig(value) {
   $("#c-warp-pool").value = warp.pool_size || 2;
   $("#c-warp-stack").value = warp.stack || "ipv6";
   $("#c-warp-source").value = warp.source_ipv6 || "";
+  $("#c-warp-connect").value = warp.connect_via || "";
   $("#c-proxyfile").value = value.proxyfile;
   $("#c-up-zen").value = value.upstream.zen;
   $("#c-up-go").value = value.upstream.go;
@@ -110,6 +213,7 @@ function fillConfig(value) {
   $("#c-level").value = value.logging.level;
   $("#c-ring").value = value.logging.ring_size;
   $("#c-dump-bodies").checked = !!value.logging.dump_request_bodies;
+  fillPrompt(value);
   ["server_keys", "zen_keys", "go_keys", "proxies"].forEach(renderChips);
   renderRestartNotice(value);
 }
@@ -130,6 +234,7 @@ async function save(event) {
         pool_size: numberValue("#c-warp-pool"),
         stack: $("#c-warp-stack").value,
         source_ipv6: $("#c-warp-source").value.trim(),
+        connect_via: $("#c-warp-connect").value.trim(),
       },
       proxies: secretInputs("proxies"),
       proxyfile: $("#c-proxyfile").value,
@@ -146,6 +251,7 @@ async function save(event) {
         effort: $("#c-reasoning-effort").value,
         effort_by_model: JSON.parse($("#c-reasoning-by-model").value || "{}"),
       },
+      prompt: promptUpdate(),
       performance: {
         max_idle_conns: numberValue("#c-idle"),
         max_idle_conns_per_host: numberValue("#c-idle-host"),
@@ -251,6 +357,52 @@ export default {
     $("#config-form").addEventListener("submit", save);
     $("#reload-config").addEventListener("click", reload);
     $("#reveal").addEventListener("click", reveal);
+    $("#c-prompt-enabled").addEventListener("change", renderPromptPreview);
+    $("#prompt-reset").addEventListener("click", forcePromptDefaults);
+    $("#prompt-copy").addEventListener("click", () =>
+      copyText($("#prompt-preview").textContent, "Prompt preview copied"),
+    );
+    Object.entries(PROMPT_PARTS).forEach(([part, spec]) => {
+      $(`[data-prompt-custom="${part}"]`).addEventListener("change", (event) => {
+        const editor = promptEditor(part);
+        if (event.target.checked) {
+          if (!editor.value) editor.value = promptDefaults()[spec.field] || "";
+          editor.disabled = false;
+        } else {
+          editor.value = promptDefaults()[spec.field] || "";
+          editor.disabled = true;
+        }
+        updatePromptCount(part);
+        renderPromptPreview();
+      });
+      $(`[data-prompt-reset="${part}"]`).addEventListener("click", () => {
+        setPromptPart(part, false, "");
+        renderPromptPreview();
+      });
+    });
+    $('[data-prompt-reset="extra"]').addEventListener("click", () => {
+      $("#c-prompt-extra").value = "";
+      updatePromptCount("extra");
+      renderPromptPreview();
+    });
+    $$(".prompt-editor").forEach((editor) => {
+      editor.addEventListener("input", () => {
+        const part = Object.entries(PROMPT_PARTS).find(
+          ([, spec]) => spec.editor === `#${editor.id}`,
+        )?.[0];
+        updatePromptCount(part || "extra");
+        renderPromptPreview();
+      });
+    });
+    $$("[data-prompt-preview]").forEach((button) => {
+      button.addEventListener("click", () => {
+        promptPreviewVersion = button.dataset.promptPreview;
+        $$("[data-prompt-preview]").forEach((item) =>
+          item.classList.toggle("active", item === button),
+        );
+        renderPromptPreview();
+      });
+    });
     onChange(() => {
       const value = store.get("config");
       if (value) renderRestartNotice(value);

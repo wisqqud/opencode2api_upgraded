@@ -152,9 +152,13 @@ type ConfigView struct {
 	Logging       config.LoggingConfig     `json:"logging"`
 	Prefer        config.Tier              `json:"prefer"`
 	Reasoning     config.ReasoningConfig   `json:"reasoning"`
-	WebUI         WebUIView                `json:"webui"`
-	Effective     EffectiveView            `json:"effective"`
-	Restart       []string                 `json:"restart_required_fields,omitempty"`
+	Prompt        config.PromptConfig      `json:"prompt"`
+	// PromptDefaults is the built-in text for every prompt part; the Prompt
+	// inject tab shows it when a part has no override.
+	PromptDefaults gateway.PromptDefaults `json:"prompt_defaults"`
+	WebUI          WebUIView              `json:"webui"`
+	Effective      EffectiveView          `json:"effective"`
+	Restart        []string               `json:"restart_required_fields,omitempty"`
 }
 
 // EffectiveView is the set of listeners the running process actually bound,
@@ -203,7 +207,10 @@ type ConfigUpdate struct {
 	// A pointer distinguishes an omitted field (legacy clients should keep the
 	// current reasoning configuration) from an explicit empty object (clear it).
 	Reasoning *config.ReasoningConfig `json:"reasoning,omitempty"`
-	WebUI     WebUIView               `json:"webui"`
+	// Prompt follows the same rule so a client that does not send the Prompt
+	// inject tab keeps the current prompt overrides.
+	Prompt *config.PromptConfig `json:"prompt,omitempty"`
+	WebUI  WebUIView            `json:"webui"`
 }
 
 // handleGetConfig answers with the current configuration, secrets masked.
@@ -247,6 +254,10 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	if update.Reasoning != nil {
 		reasoning = *update.Reasoning
 	}
+	prompt := current.Prompt
+	if update.Prompt != nil {
+		prompt = *update.Prompt
+	}
 	proxyBindings := current.ProxyBindings
 	if update.ProxyBindings != nil {
 		proxyBindings = update.ProxyBindings
@@ -258,6 +269,7 @@ func (a *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		ProxyBindings: proxyBindings,
 		Upstream:      update.Upstream, Retry: update.Retry, Models: update.Models, Performance: update.Performance, Logging: update.Logging, Prefer: update.Prefer,
 		Reasoning: reasoning,
+		Prompt:    prompt,
 		WebUI:     config.WebUIConfig{Enabled: update.WebUI.Enabled, Listen: update.WebUI.Listen, Username: current.WebUI.Username, PasswordHash: current.WebUI.PasswordHash, SessionTTLMinutes: update.WebUI.SessionTTLMinutes},
 	}
 	result, err := a.manager.Apply(candidate, true)
@@ -400,6 +412,7 @@ func (a *Server) configView() ConfigView {
 		Listen: cfg.Listen, ServerKeys: maskSecrets(cfg.ServerKeys, false), ZenKeys: maskSecrets(cfg.ZenKeys, false), GoKeys: maskSecrets(cfg.GoKeys, false), Anonymous: cfg.Anonymous, Warp: cfg.Warp,
 		Proxies: maskSecrets(cfg.Proxies, true), ProxyFile: cfg.ProxyFile, ProxyBindings: cfg.ProxyBindings, Upstream: cfg.Upstream, Retry: cfg.Retry, Models: cfg.Models,
 		Performance: cfg.Performance, Logging: cfg.Logging, Prefer: cfg.Prefer, Reasoning: cfg.Reasoning,
+		Prompt: cfg.Prompt, PromptDefaults: gateway.DefaultPromptParts(),
 		WebUI:     WebUIView{Enabled: cfg.WebUI.Enabled, Listen: cfg.WebUI.Listen, Username: cfg.WebUI.Username, SessionTTLMinutes: cfg.WebUI.SessionTTLMinutes},
 		Effective: EffectiveView{Listen: effective.API, WebUIListen: effective.WebUI, WebUIEnabled: effective.WebUIEnabled},
 		Restart:   restart,
