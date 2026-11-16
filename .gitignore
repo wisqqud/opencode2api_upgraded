@@ -1,25 +1,37 @@
+# Local configuration and credentials
 .key
+.env
+.env.*
 config.json
-config.json.bak
+config.json.*
 .config-*.tmp
+.local/
+
+# Model/price caches and runtime state
 *.models.dev.json
-opencode/
+*.models.catalog.json
+statistics.json
+.statistics-*.tmp
+*.rotation.json
+.rotation-*.tmp
+*.availability.json
+
+# Logs
+*.log
+logs/
+
+# Build output
 /opencode2api
 /opencode2api.exe
 /o2cserver.exe
-*.log
-.tmp/
-.gocache/
-*.models.catalog.json
+/*.exe
+/dist/
+/bin/
 coverage.out
 *.test
 *.test.exe
 
-*.rotation.json
-.rotation-*.tmp
-statistics.json
-.statistics-*.tmp
-
-# Local credentials, deployment backups, and verification artifacts
-.local/
-*.availability.json
+# Scratch and temporary files
+.tmp/
+.gocache/
+*.tmp
