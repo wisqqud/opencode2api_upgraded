@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"strings"
@@ -131,19 +132,26 @@ func officialToolDefinition(name string, v1 bool) (opencodeToolDefinition, bool)
 	return definition, ok
 }
 
-// officialTool renders one official definition in the wire shape the protocol
-// expects. The 2.x Chat shape marks every tool strict:false, as the client does;
-// the captured 1.x entries carry no strict field and are rendered verbatim.
-func officialTool(protocol wire.Protocol, name string, v1 bool) map[string]any {
+// officialToolDescription applies the same captured wording and host substitutions
+// to appended official tools and normalized client edit tools.
+func officialToolDescription(name string, v1 bool) string {
 	description := "Agent tool " + name
-	parameters := map[string]any{"type": "object", "properties": map[string]any{}}
 	if definition, ok := officialToolDefinition(name, v1); ok {
 		description = definition.Description
+	}
+	return hostToolDescription(name, description, v1)
+}
+
+// officialTool renders one official definition in the protocol's wire shape.
+// The 2.x Chat tools carry strict:false, while the captured 1.x tools omit it.
+func officialTool(protocol wire.Protocol, name string, v1 bool) map[string]any {
+	description := officialToolDescription(name, v1)
+	parameters := map[string]any{"type": "object", "properties": map[string]any{}}
+	if definition, ok := officialToolDefinition(name, v1); ok {
 		if definition.Parameters != nil {
 			parameters = definition.Parameters
 		}
 	}
-	description = hostToolDescription(name, description, v1)
 	switch protocol {
 	case wire.Chat:
 		function := map[string]any{
@@ -202,10 +210,10 @@ func hostToolDescription(name, description string, v1 bool) string {
 	return strings.ReplaceAll(description, "`/tmp/opencode`", "`"+hostTempDir()+"`")
 }
 
-// renameAndCompleteTools makes the tool list read as an official CLI session:
-// every named client tool is renamed to an opaque wire name, legacy functions
-// arrays are converted, and the full official set for the lane is appended.
-// The returned map restores the client names in the upstream response.
+// renameAndCompleteTools puts the lane's official set first, reuses exactly
+// matching client definitions, and follows it with opaque aliases for the other
+// client tools. Legacy functions are converted before matching and renaming.
+// The returned map restores client names in responses and keeps history aligned.
 func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 bool) (*wire.ToolRenames, bool) {
 	switch protocol {
 	case wire.Chat, wire.Responses, wire.Anthropic:
@@ -220,35 +228,22 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 			items = list
 		}
 	}
-	declaredNames := make([]string, 0, len(items))
-	declaredParams := make(map[string]map[string]any, len(items))
-	for _, item := range items {
-		entry, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		if name, ok := renamableToolName(protocol, entry); ok {
-			declaredNames = append(declaredNames, name)
-			if params := toolParameterNames(protocol, entry); len(params) > 0 {
-				declaredParams[name] = params
-			}
-		}
-	}
 	if protocol == wire.Chat || protocol == wire.Responses {
 		if legacy, ok := payload["functions"].([]any); ok {
-			for _, rawEntry := range legacy {
-				entry, ok := rawEntry.(map[string]any)
-				if ok {
-					if name := jsonutil.StringAt(entry, "name"); name != "" {
-						declaredNames = append(declaredNames, name)
-					}
-				}
-			}
-			items = append(items, convertLegacyFunctions(legacy, protocol, renames, used)...)
+			items = append(items, convertLegacyFunctions(legacy, protocol)...)
 			delete(payload, "functions")
 		}
 	}
-	shaped := make([]any, 0, len(items)+len(officialToolNames(v1)))
+	shaped := officialToolset(protocol, v1)
+	canonical := make(map[string]map[string]any, len(shaped))
+	for _, raw := range shaped {
+		entry := raw.(map[string]any)
+		name, _ := renamableToolName(protocol, entry)
+		canonical[name] = entry
+		used[name] = true
+	}
+	declaredNames := make([]string, 0, len(items))
+	declaredParams := make(map[string]map[string]any, len(items))
 	for _, item := range items {
 		entry, ok := item.(map[string]any)
 		if !ok {
@@ -260,12 +255,25 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 			shaped = append(shaped, item)
 			continue
 		}
+		declaredNames = append(declaredNames, name)
+		if params := toolParameterNames(protocol, entry); len(params) > 0 {
+			declaredParams[name] = params
+		}
+		// Match the original complete declaration before edit normalization:
+		// a schema, strict flag or description difference still needs an alias.
+		if official, exists := canonical[name]; exists && sameToolDefinition(entry, official) {
+			renames.Add(name, name)
+			renames.BindOfficial(name, name)
+			continue
+		}
+		if strings.EqualFold(name, "edit") {
+			setToolDescription(protocol, entry, officialToolDescription("edit", v1))
+		}
 		if wireName := clientWireName(renames, used, name); wireName != name {
 			setToolName(protocol, entry, wireName)
 		}
 		shaped = append(shaped, entry)
 	}
-	shaped = append(shaped, officialToolset(protocol, v1)...)
 	payload["tools"] = shaped
 	officialNames := officialToolNames(v1)
 	bindOfficialToolAliases(renames, declaredNames, declaredParams, officialNames, v1)
@@ -278,6 +286,18 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 	sanitizeToolHistory(payload, protocol, declared, renames, officialToolNameSet(v1))
 	rewriteToolReferences(payload, protocol, renames)
 	return renames, true
+}
+
+// sameToolDefinition compares complete JSON objects, ignoring object key order.
+// Encoding also normalizes Go slice/number representations from embedded assets
+// and decoded requests; extra fields and array order remain significant.
+func sameToolDefinition(client, official map[string]any) bool {
+	left, err := jsonutil.Marshal(client)
+	if err != nil {
+		return false
+	}
+	right, err := jsonutil.Marshal(official)
+	return err == nil && bytes.Equal(left, right)
 }
 
 func bindOfficialToolAliases(renames *wire.ToolRenames, declaredNames []string, declaredParams map[string]map[string]any, officialNames []string, v1 bool) {
@@ -627,9 +647,21 @@ func setToolName(protocol wire.Protocol, entry map[string]any, name string) {
 	entry["name"] = name
 }
 
+// setToolDescription replaces the description while preserving the client's
+// tool name, schema, strict flag and any other protocol-specific fields.
+func setToolDescription(protocol wire.Protocol, entry map[string]any, description string) {
+	if protocol == wire.Chat {
+		if function, ok := entry["function"].(map[string]any); ok {
+			function["description"] = description
+		}
+		return
+	}
+	entry["description"] = description
+}
+
 // convertLegacyFunctions turns the pre-tools "functions" array into entries of
-// the protocol's tool shape and renames their names.
-func convertLegacyFunctions(entries []any, protocol wire.Protocol, renames *wire.ToolRenames, used map[string]bool) []any {
+// the protocol's tool shape. The common shaping loop normalizes and renames them.
+func convertLegacyFunctions(entries []any, protocol wire.Protocol) []any {
 	converted := make([]any, 0, len(entries))
 	for _, raw := range entries {
 		entry, ok := raw.(map[string]any)
@@ -640,12 +672,11 @@ func convertLegacyFunctions(entries []any, protocol wire.Protocol, renames *wire
 		if name == "" {
 			continue
 		}
-		wireName := clientWireName(renames, used, name)
 		description := jsonutil.StringAt(entry, "description")
 		switch protocol {
 		case wire.Chat:
 			function := map[string]any{
-				"name":        wireName,
+				"name":        name,
 				"description": description,
 				"parameters":  legacyParameters(entry),
 			}
@@ -656,7 +687,7 @@ func convertLegacyFunctions(entries []any, protocol wire.Protocol, renames *wire
 		case wire.Responses:
 			tool := map[string]any{
 				"type":        "function",
-				"name":        wireName,
+				"name":        name,
 				"description": description,
 				"parameters":  legacyParameters(entry),
 			}

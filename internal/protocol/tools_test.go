@@ -22,6 +22,116 @@ func shellRenames() *ToolRenames {
 	return renames
 }
 
+func TestClientToolWireNameUses24SHA256HexCharacters(t *testing.T) {
+	const want = "clnt_aa6e99885a69dcd170429df2"
+	used := map[string]bool{}
+	if got := ClientToolWireName("exec_command", used); got != want {
+		t.Fatalf("ClientToolWireName(exec_command) = %q; want %q", got, want)
+	}
+	if !used[want] {
+		t.Fatalf("wire name %q was not recorded as used", want)
+	}
+	if got := ClientToolWireName("exec_command", used); got != want+"_2" {
+		t.Fatalf("colliding wire name = %q; want %q", got, want+"_2")
+	}
+	if got := ClientToolWireName("exec_command", nil); got != want {
+		t.Fatalf("wire name changed between requests: %q; want %q", got, want)
+	}
+	renames := NewToolRenames()
+	renames.Add("exec_command", want)
+	if got, changed := renames.Resolve(want); got != "exec_command" || !changed {
+		t.Fatalf("Resolve(%q) = (%q, %v); want (exec_command, true)", want, got, changed)
+	}
+}
+
+func TestToolRenamesIdentityBindings(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		renames *ToolRenames
+	}{
+		{name: "constructor", renames: NewToolRenames()},
+		{name: "zero value", renames: &ToolRenames{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			renames := test.renames
+			if !renames.Empty() || renames.Count() != 0 {
+				t.Fatalf("new mapping: Empty = %v, Count = %d", renames.Empty(), renames.Count())
+			}
+			renames.Add("read_file", "read_file")
+			renames.Add("read_file", "read_file")
+			renames.BindOfficial("read_file", "read_file")
+			if renames.Empty() || renames.Count() != 0 {
+				t.Fatalf("identity binding: Empty = %v, Count = %d; want false, 0", renames.Empty(), renames.Count())
+			}
+			for method, lookup := range map[string]func(string) (string, bool){
+				"Wire": renames.Wire, "Client": renames.Client, "Official": renames.Official,
+			} {
+				if got, ok := lookup("read_file"); !ok || got != "read_file" {
+					t.Fatalf("%s(read_file) = (%q, %v); want (read_file, true)", method, got, ok)
+				}
+			}
+			for name, want := range map[string]string{
+				"read_file": "read_file", "READ_FILE": "read_file", "read-file": "read_file",
+			} {
+				got, changed := renames.Resolve(name)
+				if got != want || changed != (name != want) {
+					t.Fatalf("Resolve(%q) = (%q, %v); want (%q, %v)", name, got, changed, want, name != want)
+				}
+			}
+			// Conflicts must preserve the first pair in both directions.
+			renames.Add("read_file", "another_wire")
+			renames.Add("another_client", "read_file")
+			if _, ok := renames.Wire("another_client"); ok {
+				t.Fatal("identity wire name was assigned to a second client")
+			}
+			if _, ok := renames.Client("another_wire"); ok {
+				t.Fatal("identity client name was assigned a second wire name")
+			}
+			renames.Add("exec_command", ClientToolWireName("exec_command", nil))
+			if renames.Count() != 1 {
+				t.Fatalf("mixed identity and rename Count = %d; want 1", renames.Count())
+			}
+		})
+	}
+}
+
+func TestIdentityBindingsKeepResponseAndStreamResolutionActive(t *testing.T) {
+	renames := NewToolRenames()
+	renames.Add("read_file", "read_file")
+	renames.BindOfficial("read", "read_file")
+	body := []byte(`{"choices":[{"index":0,"message":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read","arguments":"{\"path\":\"/tmp/test\"}"}}]}}]}`)
+	out := RenameResponseTool(body, Chat, renames)
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("rewritten response is not JSON: %v", err)
+	}
+	function := payload["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)["tool_calls"].([]any)[0].(map[string]any)["function"].(map[string]any)
+	if function["name"] != "read_file" || function["arguments"] != `{"path":"/tmp/test"}` {
+		t.Fatalf("identity response = %v; want read_file with unchanged arguments", function)
+	}
+	frames := []string{
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_","arguments":""}}]}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"file","arguments":"{\"path\":\"/tmp/test\"}"}}]}}]}`,
+		`data: [DONE]`,
+	}
+	stream, err := io.ReadAll(RenameStreamReader(strings.NewReader(strings.Join(frames, "\n\n")+"\n\n"), Chat, renames))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, arguments := collectStreamCalls(t, string(stream))
+	if name != "read_file" || arguments != `{"path":"/tmp/test"}` {
+		t.Fatalf("identity stream = (%q, %q); want read_file with unchanged arguments", name, arguments)
+	}
+}
+
+func TestOfficialOnlyBindingIsNotEmpty(t *testing.T) {
+	renames := NewToolRenames()
+	renames.BindOfficial("shell", "exec_command")
+	if renames.Empty() || renames.Count() != 0 {
+		t.Fatalf("official binding: Empty = %v, Count = %d; want false, 0", renames.Empty(), renames.Count())
+	}
+}
+
 func TestRemapArguments(t *testing.T) {
 	mapping := map[string]string{
 		"command":    "cmd",
@@ -143,12 +253,12 @@ func collectStreamCalls(t *testing.T, stream string) (string, string) {
 }
 
 // TestResolveRebuildsMangledWireName covers a model that imitates a wire name
-// from history and drops one letter.
+// from history with an old or misspelled prefix.
 func TestResolveRebuildsMangledWireName(t *testing.T) {
 	renames := shellRenames()
 	wireName, _ := renames.Wire("exec_command")
 	digest := strings.TrimPrefix(wireName, ClientToolPrefix)
-	for _, mangled := range []string{"clnt_" + digest, "clit_" + digest} {
+	for _, mangled := range []string{"clint_" + digest, "clit_" + digest} {
 		client, changed := renames.Resolve(mangled)
 		if client != "exec_command" || !changed {
 			t.Fatalf("Resolve(%q) = (%q, %v); want (exec_command, true)", mangled, client, changed)
@@ -162,7 +272,7 @@ func TestRenameResponseToolRebuildsMangledWireName(t *testing.T) {
 	renames := shellRenames()
 	wireName, _ := renames.Wire("exec_command")
 	digest := strings.TrimPrefix(wireName, ClientToolPrefix)
-	body := []byte(`{"choices":[{"index":0,"message":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"clnt_` + digest + `","arguments":"{\"cmd\":\"pwd\"}"}}]}}]}`)
+	body := []byte(`{"choices":[{"index":0,"message":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"clint_` + digest + `","arguments":"{\"cmd\":\"pwd\"}"}}]}}]}`)
 	out := RenameResponseTool(body, Chat, renames)
 	var payload map[string]any
 	if err := json.Unmarshal(out, &payload); err != nil {
@@ -177,11 +287,15 @@ func TestRenameResponseToolRebuildsMangledWireName(t *testing.T) {
 	}
 }
 
-// TestResolveLeavesUnknownMangledNameAlone pins the rebuild to registered wire
-// names: a mangled-looking name that matches nothing stays as it arrived.
-func TestResolveLeavesUnknownMangledNameAlone(t *testing.T) {
+// TestResolveLeavesUnknownHashNameAlone pins the rebuild to registered wire
+// names: an official or mangled prefix with an unknown digest stays unchanged.
+func TestResolveLeavesUnknownHashNameAlone(t *testing.T) {
 	renames := shellRenames()
-	for _, name := range []string{"clnt_deadbeef0000", "clit_deadbeef0000"} {
+	for _, name := range []string{
+		"clnt_deadbeef0000000000000000",
+		"clint_deadbeef0000000000000000",
+		"clit_deadbeef0000000000000000",
+	} {
 		client, changed := renames.Resolve(name)
 		if client != name || changed {
 			t.Fatalf("Resolve(%q) = (%q, %v); want (%q, false)", name, client, changed, name)
@@ -194,11 +308,13 @@ func TestResolveLeavesUnknownMangledNameAlone(t *testing.T) {
 func TestResolvePrefersDeclaredLiteralName(t *testing.T) {
 	renames := shellRenames()
 	wireName, _ := renames.Wire("exec_command")
-	literal := "clnt_" + strings.TrimPrefix(wireName, ClientToolPrefix)
-	renames.Add(literal, ClientToolWireName(literal, map[string]bool{}))
-	client, changed := renames.Resolve(literal)
-	if client != literal || changed {
-		t.Fatalf("Resolve(%q) = (%q, %v); want (%q, false)", literal, client, changed, literal)
+	for _, prefix := range []string{"clint_", "clit_"} {
+		literal := prefix + strings.TrimPrefix(wireName, ClientToolPrefix)
+		renames.Add(literal, ClientToolWireName(literal, map[string]bool{}))
+		client, changed := renames.Resolve(literal)
+		if client != literal || changed {
+			t.Fatalf("Resolve(%q) = (%q, %v); want (%q, false)", literal, client, changed, literal)
+		}
 	}
 }
 
@@ -209,7 +325,7 @@ func TestRenameStreamReaderRebuildsMangledWireName(t *testing.T) {
 	wireName, _ := renames.Wire("exec_command")
 	digest := strings.TrimPrefix(wireName, ClientToolPrefix)
 	frames := []string{
-		`data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"clnt_` + digest + `","arguments":"{\"cmd\":\"pwd\"}"}}]}}]}`,
+		`data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"clint_` + digest + `","arguments":"{\"cmd\":\"pwd\"}"}}]}}]}`,
 		`data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
 		`data: [DONE]`,
 	}

@@ -10,20 +10,21 @@ import (
 
 // ClientToolPrefix marks every client tool the gateway renames on a shaped
 // free-tier request. The prefix keeps client tools distinct from the official
-// OpenCode set the gateway appends, and lets responses be restored to the names
+// OpenCode set at the start of the tool list, and lets responses be restored to the names
 // the client declared. What follows it is a digest, never the client name: the
 // free tier refuses bodies that still read as another client's session.
-const ClientToolPrefix = "clint_"
+const ClientToolPrefix = "clnt_"
 
-// clientToolDigestLength is how many hex characters of the client name digest
-// a wire name carries. Twelve is far past the collision point for the handful
-// of tools one request declares.
-const clientToolDigestLength = 12
+// clientToolDigestLength is how many hex characters of the SHA-256 client name
+// digest a wire name carries. Twenty-four hex characters retain twelve bytes
+// of the digest while keeping the wire name compact.
+const clientToolDigestLength = 24
 
 // toolWireNameLimit is the longest tool name the upstreams accept.
 const toolWireNameLimit = 64
 
-// ToolRenames records the client-to-wire tool names of one shaped request. The
+// ToolRenames records the client-to-wire tool names of one shaped request,
+// including identity bindings for client tools that reuse official names. The
 // zero value and a nil pointer are both empty and safe to use.
 type ToolRenames struct {
 	toWire   map[string]string
@@ -52,17 +53,26 @@ func NewToolRenames() *ToolRenames {
 	}
 }
 
-// Empty reports whether no tool was renamed.
+// Empty reports whether no client-to-wire or official binding was recorded.
+// Identity bindings keep response and history processing active even though
+// Count does not count them as renames.
 func (r *ToolRenames) Empty() bool {
-	return r == nil || len(r.toWire) == 0
+	return r == nil || (len(r.toWire) == 0 && len(r.official) == 0)
 }
 
-// Count reports how many client tools were renamed.
+// Count reports how many client tools have a different wire name. Identity
+// bindings are registered tools, but do not represent actual renames.
 func (r *ToolRenames) Count() int {
 	if r == nil {
 		return 0
 	}
-	return len(r.toWire)
+	count := 0
+	for client, wire := range r.toWire {
+		if client != wire {
+			count++
+		}
+	}
+	return count
 }
 
 // Wire returns the wire name registered for an exact client name.
@@ -164,12 +174,24 @@ func RemapArguments(arguments string, mapping map[string]string) string {
 	return string(encoded)
 }
 
-// Add records one client-to-wire mapping. Adding the same pair twice is a
-// no-op; a conflicting pair keeps the first wire name so the map stays
-// invertible.
+// Add records one client-to-wire mapping, including an identity mapping when
+// a client tool reuses an official name. Adding the same pair twice is a no-op;
+// a conflicting pair keeps the first wire name so the map stays invertible.
 func (r *ToolRenames) Add(client, wire string) {
-	if r == nil || client == "" || wire == "" || client == wire {
+	if r == nil || client == "" || wire == "" {
 		return
+	}
+	if r.toWire == nil {
+		r.toWire = map[string]string{}
+	}
+	if r.toClient == nil {
+		r.toClient = map[string]string{}
+	}
+	if r.byCase == nil {
+		r.byCase = map[string]string{}
+	}
+	if r.byShape == nil {
+		r.byShape = map[string]string{}
 	}
 	if existing, ok := r.toWire[client]; ok {
 		if existing != wire {
@@ -250,11 +272,11 @@ func (r *ToolRenames) HasLongerPrefix(prefix string) bool {
 // declared. It is the response-side counterpart of the wire rename: an exact
 // wire name restores, an official alias maps to the matching client tool, a
 // declared client name that looks mangled wins over a rebuilt one, a mangled
-// wire name (clnt_ or clit_ for clint_) is rebuilt when it arrives in one
-// piece, a clint_ prefix is stripped as a best-effort recovery (for example
-// after a configuration reload mid-stream), and a name that
-// differs from exactly one declared client tool only in case, or else only in
-// case and separators (todowrite → todo_write), is folded onto that tool. A
+// wire name (clint_ or clit_ for clnt_) is rebuilt when it arrives in one
+// piece and matches a registered digest, and unknown digest names are left
+// unchanged. A name that differs from exactly one declared client tool only in
+// case, or else only in case and separators (todowrite → todo_write), is folded
+// onto that tool. A
 // name two tools fold to is never guessed between. It reports whether the
 // result differs from the name given.
 func (r *ToolRenames) Resolve(wire string) (string, bool) {
@@ -272,24 +294,22 @@ func (r *ToolRenames) Resolve(wire string) (string, bool) {
 	if _, declared := r.toWire[wire]; declared {
 		return wire, false
 	}
-	// A model imitating a wire name from history sometimes drops one letter
-	// (clnt_ for clint_, clit_ for clint_). Rebuild the name it mangled so the
-	// call still reaches the tool the client declared. A name a stream splits
-	// across frames is not rebuilt: the first fragment settles the name.
-	for _, mangled := range []string{"clnt_", "clit_"} {
+	// A model imitating a wire name from history sometimes writes clint_ or
+	// clit_ instead of clnt_. Rebuild only a registered wire name with the
+	// same digest. A name a stream splits across frames is not rebuilt: the
+	// first fragment settles the name.
+	for _, mangled := range []string{"clint_", "clit_"} {
 		if rest, ok := strings.CutPrefix(wire, mangled); ok && rest != "" {
 			if client, ok := r.Client(ClientToolPrefix + rest); ok {
 				return client, client != wire
 			}
+			return wire, false
 		}
 	}
+	if strings.HasPrefix(wire, ClientToolPrefix) {
+		return wire, false
+	}
 	client := wire
-	if rest, ok := strings.CutPrefix(wire, ClientToolPrefix); ok && rest != "" {
-		client = rest
-	}
-	if _, declared := r.toWire[client]; declared {
-		return client, client != wire
-	}
 	lower := strings.ToLower(client)
 	if match, ok := r.byCase[lower]; ok {
 		// A key present with an empty value is two client tools folded
