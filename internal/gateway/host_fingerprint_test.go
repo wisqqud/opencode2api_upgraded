@@ -1,11 +1,39 @@
 package gateway
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	wire "opencode2api/internal/protocol"
 )
+
+// The fixture contains the changed definitions from a local capture of the
+// official 2.3.0 CLI, independent of the assets embedded in production.
+func TestV2ChangedToolsMatchOpenCode230(t *testing.T) {
+	data, err := os.ReadFile("testdata/opencode_230_tools.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var captured map[string]opencodeToolDefinition
+	if err := json.Unmarshal(data, &captured); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range captured {
+		t.Run(name, func(t *testing.T) {
+			got := officialTool(wire.Chat, name, false)["function"].(map[string]any)
+			if got["description"] != want.Description || !reflect.DeepEqual(got["parameters"], want.Parameters) {
+				t.Errorf("%s differs from the official 2.3.0 description or schema", name)
+			}
+			if got["strict"] != false {
+				t.Errorf("%s must retain the official strict:false flag", name)
+			}
+		})
+	}
+}
 
 func TestWorktreeRootMatchesV2Workspace(t *testing.T) {
 	base := t.TempDir()

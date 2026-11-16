@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func TestBunClientHelloMatchesOpenCode225(t *testing.T) {
+func TestBunClientHelloMatchesOpenCode230(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { client.Close(); server.Close() })
 	if err := server.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -70,14 +70,14 @@ func TestBunClientHelloMatchesOpenCode225(t *testing.T) {
 		}
 		i += 4 + length
 	}
-	// SignatureAlgorithms from the official 2.2.5 ClientHello capture.
+	// SignatureAlgorithms from the official 2.3.0 ClientHello capture.
 	want := []uint16{0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601, 0x0807, 0x0603, 0x0201}
 	if !slices.Equal(signatures, want) {
-		t.Fatalf("wire signature algorithms = %04x; official 2.2.5 = %04x", signatures, want)
+		t.Fatalf("wire signature algorithms = %04x; official 2.3.0 = %04x", signatures, want)
 	}
 }
 
-func TestBunRequestMatchesOpenCode225HeaderOrder(t *testing.T) {
+func TestBunRequestMatchesOpenCode230HeaderOrder(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { client.Close(); server.Close() })
 	if err := server.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
@@ -113,7 +113,7 @@ func TestBunRequestMatchesOpenCode225HeaderOrder(t *testing.T) {
 	}
 	req.Header.Set("Authorization", "Bearer public")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "opencode/latest/2.2.5/cli")
+	req.Header.Set("User-Agent", V2UserAgent())
 	req.Header.Set("x-opencode-client", "cli")
 	req.Header.Set("Content-Length", "999")
 	resp, err := (&http.Client{Transport: transport}).Do(req)
@@ -126,7 +126,7 @@ func TestBunRequestMatchesOpenCode225HeaderOrder(t *testing.T) {
 	}
 	want := "POST /inference/openai/v1/chat/completions HTTP/1.1\r\n" +
 		"Authorization: Bearer public\r\nContent-Type: application/json\r\n" +
-		"User-Agent: opencode/latest/2.2.5/cli\r\nx-opencode-client: cli\r\n" +
+		"User-Agent: opencode/latest/2.3.0/cli\r\nx-opencode-client: cli\r\n" +
 		"Connection: keep-alive\r\nAccept: */*\r\nHost: localhost\r\n" +
 		"Accept-Encoding: gzip, deflate, br, zstd\r\nContent-Length: 2\r\n\r\n{}"
 	if got := <-captured; got != want {

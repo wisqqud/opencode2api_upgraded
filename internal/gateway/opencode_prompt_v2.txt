@@ -30,6 +30,36 @@ The catalog is complete. Do not guess tool names.
 ## Code Mode tools (call only inside `execute`)
 
 - opencode (8 tools) // Tools for managing OpenCode itself, such as working with sessions and worktrees, searching the available models, and reading MCP resources.
+  - tools.opencode.session_move({
+  /** Omit to move the current session. @pattern ^ses */
+  sessionID?: string,
+  /** Destination directory, relative to the target session's directory or absolute. Supports ~. @minLength 1 */
+  directory: string,
+}): Promise<{
+  /** @pattern ^ses */
+  sessionID: string,
+  directory: string,
+}> // Move a session to another directory, or omit sessionID to move the current session. The current session moves at the ...
+  - tools.opencode.worktree_create({
+  name: string,
+}): Promise<{
+  directory: string,
+}> // Create a named worktree. Returns its directory.
+  - tools.opencode.worktree_list(): Promise<{
+  worktrees: Array<{
+      directory: string,
+      strategy?: string,
+    }>,
+}> // List a repository's worktrees.
+  - tools.opencode.worktree_remove({
+  /** Absolute path of the worktree to remove. @minLength 1 */
+  directory: string,
+  /** Discard modified and untracked files. Only set this when the user has confirmed forced removal. */
+  force?: boolean,
+}): Promise<{
+  directory: string,
+  removed: boolean,
+}> // Remove a worktree. The repository location selects configuration; directory identifies the worktree to remove.
   - tools.opencode.list_mcp_resources({
   /** MCP server name as configured. Omit to list every server. */
   server?: string,
@@ -121,16 +151,6 @@ The catalog is complete. Do not guess tool names.
         mimeType?: string,
       }>,
 }> // Read one MCP resource by server and URI. Not for local files. Always return the full contents rather than slicing or ...
-  - tools.opencode.session_move({
-  /** Omit to move the current session. @pattern ^ses */
-  sessionID?: string,
-  /** Destination directory, relative to the target session's directory or absolute. Supports ~. @minLength 1 */
-  directory: string,
-}): Promise<{
-  /** @pattern ^ses */
-  sessionID: string,
-  directory: string,
-}> // Move a session to another directory, or omit sessionID to move the current session. The current session moves at the ...
   - tools.opencode.session_rename({
   /** Omit to rename the current session. @pattern ^ses */
   sessionID?: string,
@@ -141,26 +161,6 @@ The catalog is complete. Do not guess tool names.
   sessionID: string,
   title: string,
 }> // Rename a session, or omit sessionID to rename the current session. Use a short, specific title that summarizes the wo...
-  - tools.opencode.worktree_create({
-  name: string,
-}): Promise<{
-  directory: string,
-}> // Create a named worktree. Returns its directory.
-  - tools.opencode.worktree_list(): Promise<{
-  worktrees: Array<{
-      directory: string,
-      strategy?: string,
-    }>,
-}> // List a repository's worktrees.
-  - tools.opencode.worktree_remove({
-  /** Absolute path of the worktree to remove. @minLength 1 */
-  directory: string,
-  /** Discard modified and untracked files. Only set this when the user has confirmed forced removal. */
-  force?: boolean,
-}): Promise<{
-  directory: string,
-  removed: boolean,
-}> // Remove a worktree. The repository location selects configuration; directory identifies the worktree to remove.
 
 Skills provide specialized instructions and workflows for specific tasks.
 Use the skill tool to load a skill when a task matches its description.

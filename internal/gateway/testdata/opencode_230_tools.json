@@ -1,0 +1,77 @@
+{
+  "read": {
+    "description": "Read the contents of a file or directory. Supports text files, images, and PDFs. Images and PDFs are presented directly to the model. Each text line is prefixed by its 1-based line number as <line>: <content>. The prefix is for reference and is not part of the file content. Directory entries are returned one per line. Use offset and limit to read large files or directories in sections. Prefer one larger read over many small slices, and use grep to find specific content in large files.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File or directory to read"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "The line or directory entry to start reading from (1-based)"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The maximum number of lines or directory entries to read (defaults to and capped at 2000)"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "subagent": {
+    "description": "Spawns an agent in a child session to work on the specified task.\nSubagents always run in the background: the call returns immediately with a sessionID, and you receive a `<subagent>` message each time the child goes idle, including after later work.\nKeep working on non-overlapping tasks, or briefly tell the user what you launched and end your response. Do not sleep, poll, or proactively check on the child's progress.\nNew child sessions start with fresh context, so include all relevant context and instructions when you don't pass a sessionID.\nPass the returned sessionID to continue that specific child conversation. A follow-up to a running child joins its current run.\n\nAvailable subagents:\n- explore: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code for keywords (eg. \"API endpoints\"), or answer questions about the codebase (eg. \"how do API endpoints work?\"). When calling this agent, specify the desired thoroughness level: \"quick\" for basic searches, \"medium\" for moderate exploration, or \"very thorough\" for comprehensive analysis across multiple locations and naming conventions.\n- general: General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "The type of specialized agent to use for this task. If the user asks for a subagent by a name that is not one of the available subagents, they most likely mean a model: pick a suitable agent and pass the name through the model parameter instead."
+        },
+        "description": {
+          "type": "string",
+          "description": "A short 3-5 word label for the task, displayed to the user"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The task for the subagent to perform"
+        },
+        "model": {
+          "type": "string",
+          "description": "NEVER set this unless the user explicitly asks for a particular model or variant. It must be a chat model; image and decision models can't run subagents. The value is written as \"providerID/modelID\", or \"providerID/modelID#variant\" to include a variant. Do not guess the ID: look the model up with the models tool, filtering to your own provider first."
+        },
+        "sessionID": {
+          "type": "string",
+          "pattern": "^ses",
+          "description": "Send a follow-up to an existing subagent, running or finished. Omit to start a new one."
+        }
+      },
+      "required": [
+        "agent",
+        "description",
+        "prompt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "execute": {
+    "description": "Run JavaScript in a confined Code Mode runtime to script tool calls and HTTP requests and compose their results.\nWrite plain JavaScript and send it exactly as written: no code fence, and no JSON or other wrapper around it.\n`fetch` is available for HTTP requests. Imports, direct filesystem access, and timers are unavailable: there is no `setTimeout` or sleep. All other external access goes through `tools`.\nInside `execute`, the only callable tools are those explicitly listed in the Code Mode catalog instructions or returned by the `search` function. Ignore tools shown outside the Code Mode catalog. They are not available in the Code Mode runtime.\nCall tools through `tools` using only exact paths and signatures from the catalog. Do not infer or normalize tool names; preserve bracket notation such as `tools.<namespace>[\"tool-name\"](input)`.\nPrefer an explicit `return`; if omitted, the final top-level expression becomes the result.\nAwait every call whose completion matters; pending calls are interrupted when execution ends. Run independent calls concurrently with `Promise.allSettled`.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

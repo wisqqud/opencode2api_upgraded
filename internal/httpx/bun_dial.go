@@ -23,7 +23,7 @@ import (
 // http.DefaultTransport.
 const bunHandshakeTimeout = 10 * time.Second
 
-// bunClientHello returns the ClientHello captured from OpenCode 2.2.5's Bun
+// bunClientHello returns the ClientHello verified against OpenCode 2.3.0's Bun
 // fetch: JA4 t13d1713h1, no GREASE, no padding, http/1.1 as the only ALPN
 // protocol and X25519MLKEM768 as the first key share. uTLS keeps handshake
 // state in the extensions, so every connection needs a fresh spec.
