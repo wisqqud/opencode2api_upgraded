@@ -589,6 +589,19 @@ func (c *ModelCatalog) Known(model string) bool {
 	return false
 }
 
+// ModelName returns the published OpenCode display name, or an empty string
+// when metadata is unavailable or an older cache has no name.
+func (c *ModelCatalog) ModelName(model string) string {
+	c.mu.RLock()
+	pricing := c.pricing
+	c.mu.RUnlock()
+	if pricing == nil {
+		return ""
+	}
+	price, _ := pricing.Price(model)
+	return strings.TrimSpace(price.Name)
+}
+
 // MetadataForTier returns the rich per-model metadata (context window,
 // reasoning, tool call, modalities) captured from the OpenCode capability
 // catalog for the tier that will actually serve the request. Same-named models

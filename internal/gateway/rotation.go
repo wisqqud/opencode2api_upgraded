@@ -381,6 +381,9 @@ func (g *Gateway) rotationAttempt(parent context.Context, w http.ResponseWriter,
 		b = wire.ExtractChatTextToolCalls(b)
 	}
 	if err == nil {
+		b, err = wire.AdaptResponseTools(b, route.Protocol, toolRenames)
+	}
+	if err == nil {
 		b = wire.RenameResponseTool(b, route.Protocol, toolRenames)
 	}
 	var document map[string]any

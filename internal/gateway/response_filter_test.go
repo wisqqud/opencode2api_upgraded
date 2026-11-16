@@ -26,7 +26,7 @@ func TestShapedResponseFilter(t *testing.T) {
 					if scenario != "no_client_tools" {
 						payload["tools"] = []any{responseFilterClientEdit(protocol)}
 					}
-					renames, shaped := renameAndCompleteTools(payload, protocol, v1)
+					renames, shaped := renameAndCompleteTools(payload, protocol, v1, "")
 					if !shaped || !renames.RestrictsResponses() || renames.Empty() {
 						t.Fatal("shaped request did not retain an active response filter")
 					}
@@ -81,7 +81,7 @@ func TestShapedResponseFilter(t *testing.T) {
 func TestShapedResponseFilterPreservesBuiltins(t *testing.T) {
 	for _, protocol := range []wire.Protocol{wire.Responses, wire.Anthropic} {
 		t.Run(string(protocol), func(t *testing.T) {
-			renames, _ := renameAndCompleteTools(map[string]any{}, protocol, false)
+			renames, _ := renameAndCompleteTools(map[string]any{}, protocol, false, "")
 			var document map[string]any
 			var stream string
 			if protocol == wire.Responses {

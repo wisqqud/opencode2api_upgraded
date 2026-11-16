@@ -34,6 +34,7 @@ const (
 // metadata did not state it.
 type Price struct {
 	ID            string   `json:"id"`
+	Name          string   `json:"name,omitempty"`
 	Input         *float64 `json:"input_cost,omitempty"`
 	Output        *float64 `json:"output_cost,omitempty"`
 	CacheRead     *float64 `json:"cache_read_cost,omitempty"`
@@ -395,7 +396,8 @@ func decodeMetadata(data []byte) (map[string]Price, error) {
 			cost := jsonutil.MapAt(model, "cost")
 			limit := jsonutil.MapAt(model, "limit")
 			result[modelID] = Price{
-				ID: modelID, Input: numberPointer(cost, "input"), Output: numberPointer(cost, "output"),
+				ID: modelID, Name: jsonutil.StringAt(model, "name"),
+				Input: numberPointer(cost, "input"), Output: numberPointer(cost, "output"),
 				CacheRead: numberPointer(cost, "cache_read"), CacheWrite: numberPointer(cost, "cache_write"),
 				ContextWindow: jsonutil.IntAt(limit, "context"), MaxInput: jsonutil.IntAt(limit, "input"), MaxOutput: jsonutil.IntAt(limit, "output"),
 				Deprecated: metadataDeprecated(model),

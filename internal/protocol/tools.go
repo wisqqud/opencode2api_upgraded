@@ -49,6 +49,9 @@ type ToolRenames struct {
 	// responseFilter is explicitly enabled only for requests whose declared
 	// client tools must bound the response. Other contexts keep passthrough.
 	responseFilter bool
+	// shellBridge is an explicitly declared client command tool. The bridge
+	// converts supported official filesystem calls and rejects unsupported ones.
+	shellBridge string
 }
 
 // NewToolRenames returns an empty rename set.
@@ -332,9 +335,14 @@ func (r *ToolRenames) Resolve(wire string) (string, bool) {
 	// misspelled prefix (clnt_, clint_, clit_). Rebuild only a registered wire
 	// name with the same digest. A name a stream splits across frames is not
 	// rebuilt: the first fragment settles the name.
-	for _, mangled := range []string{"clint_", "clit_"} {
+	for _, mangled := range []string{"clnt_", "clint_", "clit_"} {
 		if rest, ok := strings.CutPrefix(wire, mangled); ok && rest != "" {
 			if client, ok := r.Client(ClientToolPrefix + rest); ok {
+				return client, client != wire
+			}
+			// Wire names registered literally under the legacy prefix stay
+			// resolvable when the current prefix differs.
+			if client, ok := r.Client("clnt_" + rest); ok {
 				return client, client != wire
 			}
 			return wire, false

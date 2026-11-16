@@ -509,6 +509,12 @@ func (g *Gateway) handleInference(external wire.Protocol) http.HandlerFunc {
 			// renamed or converted.
 			responseBody = wire.ExtractChatTextToolCalls(responseBody)
 		}
+		responseBody, err = wire.AdaptResponseTools(responseBody, upstreamRoute.Protocol, toolRenames)
+		if err != nil {
+			g.logger.Warn("response tool adaptation failed", "component", "conversion", "event", "tool_compatibility_failed", "request_id", ids.Request, "error", err)
+			wire.WriteError(w, external, http.StatusBadGateway, err.Error(), "tool_compatibility_error", ids.Request)
+			return
+		}
 		responseBody = wire.RenameResponseTool(responseBody, upstreamRoute.Protocol, toolRenames)
 		if usage, reported := wire.ResponseUsage(upstreamRoute.Protocol, responseBody); meta != nil {
 			meta.Usage, meta.UsageReported = usage, reported

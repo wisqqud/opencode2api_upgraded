@@ -161,7 +161,7 @@ func TestShapeNormalizesLegacyEditDescription(t *testing.T) {
 func TestPrepareAnonymousBodyKeepsOfficialEditDescription(t *testing.T) {
 	body := []byte(`{"model":"deepseek-v4.1-flash-free","messages":[{"role":"user","content":"OK"}],"tools":[{"type":"function","function":{"name":"eDiT","description":"Edit an existing UTF-8 text file by replacing literal text.","parameters":{"type":"object","properties":{}},"strict":true}},{"type":"function","function":{"name":"other","description":"Keep this client wording","parameters":{"type":"object","properties":{}}}}]}`)
 	for _, v1 := range []bool{false, true} {
-		shaped, renames := prepareAnonymousBody(body, wire.Chat, v1, config.PromptConfig{Disabled: true}, nil)
+		shaped, renames := prepareAnonymousBody(body, wire.Chat, v1, config.PromptConfig{Disabled: true}, nil, "")
 		var payload map[string]any
 		if err := json.Unmarshal(shaped, &payload); err != nil {
 			t.Fatal(err)

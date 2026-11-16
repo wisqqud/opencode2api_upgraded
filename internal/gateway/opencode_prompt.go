@@ -16,8 +16,8 @@ import (
 // The free tier accepts only agent-shaped requests, and its abuse checks expect
 // the system prompt the official CLI sends. These assets are the CLI's own
 // wording: the v1 text for /zen (OpenCode 1.x tool names) and the v2 text for
-// /inference and /zen/go (OpenCode 2.x tool names). The v2 file is the v1 file
-// with the tool names the 2.x CLI uses.
+// /inference and /zen/go (OpenCode 2.x tool names). The v2 template fills its
+// model identity from the request and the published OpenCode display name.
 //
 //go:embed opencode_prompt_v1.txt
 var opencodePromptV1 string
@@ -378,7 +378,7 @@ func renderPromptTemplate(template, model string, environment promptEnvironment)
 
 // promptModel strips the lane prefix the CLI adds to the model name.
 func promptModel(model string) string {
-	apiModel := strings.TrimSpace(strings.TrimPrefix(model, "opencode/"))
+	apiModel := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(model), "opencode/"))
 	if apiModel == "" {
 		return "unknown"
 	}
@@ -391,7 +391,7 @@ func promptModel(model string) string {
 // listing, while 2.x lists the skills first and then the date, the environment
 // and the worktree note. A part with its Custom flag keeps the operator's text
 // instead of the built-in wording.
-func opencodeSystemPrompt(model string, v1 bool, cfg config.PromptConfig, environment promptEnvironment, override *config.PromptEnvironmentConfig) string {
+func opencodeSystemPrompt(model, modelName string, v1 bool, cfg config.PromptConfig, environment promptEnvironment, override *config.PromptEnvironmentConfig) string {
 	environment = applyPromptEnvironment(environment, override)
 	apiModel := promptModel(model)
 	if v1 {
@@ -417,6 +417,11 @@ func opencodeSystemPrompt(model string, v1 bool, cfg config.PromptConfig, enviro
 	if cfg.CustomBaseV2 {
 		base = cfg.BaseV2
 	}
+	displayName := strings.TrimSpace(modelName)
+	if displayName == "" {
+		displayName = apiModel
+	}
+	base = strings.NewReplacer("{{MODEL_NAME}}", displayName, "{{MODEL_ID}}", apiModel).Replace(base)
 	skills := opencodeSkillsV2
 	if cfg.CustomSkills {
 		skills = cfg.Skills
@@ -437,18 +442,18 @@ func opencodeSystemPrompt(model string, v1 bool, cfg config.PromptConfig, enviro
 // already carries the marker is left untouched, so repeated shaping cannot
 // duplicate the prompt. System One payloads are not chat bodies and are never
 // touched.
-func injectOfficialPrompt(payload map[string]any, protocol wire.Protocol, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
+func injectOfficialPrompt(payload map[string]any, protocol wire.Protocol, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig, modelName string) bool {
 	if payload == nil || cfg.Disabled || protocol == wire.SystemOne {
 		return false
 	}
 	model, _ := payload["model"].(string)
 	switch protocol {
 	case wire.Chat:
-		return injectChatPrompt(payload, model, v1, cfg, override)
+		return injectChatPrompt(payload, model, modelName, v1, cfg, override)
 	case wire.Anthropic:
-		return injectAnthropicPrompt(payload, model, v1, cfg, override)
+		return injectAnthropicPrompt(payload, model, modelName, v1, cfg, override)
 	case wire.Responses:
-		return injectResponsesPrompt(payload, model, v1, cfg, override)
+		return injectResponsesPrompt(payload, model, modelName, v1, cfg, override)
 	default:
 		return false
 	}
@@ -459,7 +464,7 @@ func injectOfficialPrompt(payload map[string]any, protocol wire.Protocol, v1 boo
 // environment is detected first, so its project replaces the gateway's
 // directory. Client instructions keep their order and are separated from the
 // official prompt by a blank line.
-func injectChatPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
+func injectChatPrompt(payload map[string]any, model, modelName string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
 	messages, ok := payload["messages"].([]any)
 	if !ok {
 		return false
@@ -488,7 +493,7 @@ func injectChatPrompt(payload map[string]any, model string, v1 bool, cfg config.
 		}
 	}
 	client := strings.Join(instructions, "\n")
-	system := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(client), override)
+	system := opencodeSystemPrompt(model, modelName, v1, cfg, detectPromptEnvironment(client), override)
 	if client != "" {
 		system += "\n\n" + client
 	}
@@ -498,12 +503,12 @@ func injectChatPrompt(payload map[string]any, model string, v1 bool, cfg config.
 
 // injectAnthropicPrompt prepends the prompt to the top-level system value,
 // keeping a caller's string or block list intact after it.
-func injectAnthropicPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
+func injectAnthropicPrompt(payload map[string]any, model, modelName string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
 	system, exists := payload["system"]
 	if exists && carriesOpenCodePrompt(system) {
 		return false
 	}
-	prompt := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(system), "\n")), override)
+	prompt := opencodeSystemPrompt(model, modelName, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(system), "\n")), override)
 	if !exists {
 		payload["system"] = prompt
 		return true
@@ -524,12 +529,12 @@ func injectAnthropicPrompt(payload map[string]any, model string, v1 bool, cfg co
 }
 
 // injectResponsesPrompt prepends the prompt to the Responses instructions.
-func injectResponsesPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
+func injectResponsesPrompt(payload map[string]any, model, modelName string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
 	instructions, exists := payload["instructions"]
 	if exists && carriesOpenCodePrompt(instructions) {
 		return false
 	}
-	prompt := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(instructions), "\n")), override)
+	prompt := opencodeSystemPrompt(model, modelName, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(instructions), "\n")), override)
 	if text, ok := instructions.(string); exists && ok {
 		if strings.TrimSpace(text) == "" {
 			payload["instructions"] = prompt

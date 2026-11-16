@@ -241,6 +241,7 @@ func RenameStreamReader(reader io.Reader, protocol Protocol, renames *ToolRename
 	if renames.Empty() {
 		return reader
 	}
+	reader = newToolBridgeReader(reader, protocol, renames)
 	var filter *responseToolStreamFilter
 	if renames.RestrictsResponses() {
 		filter = newResponseToolStreamFilter(protocol, renames)

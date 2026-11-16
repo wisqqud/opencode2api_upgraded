@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"regexp"
@@ -319,6 +320,18 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 	payload["tools"] = shaped
 	officialNames := officialToolNames(v1)
 	bindOfficialToolAliases(renames, declaredNames, declaredParams, officialNames, v1)
+	if !v1 && hostPlatform() != "win32" {
+		for _, raw := range items {
+			entry, _ := raw.(map[string]any)
+			name, _ := renamableToolName(protocol, entry)
+			// Entries have already been renamed; identify the original tool via
+			// its registered wire name, then validate the command schema.
+			client, _ := renames.Client(name)
+			if client == "exec_command" && supportsBridgeCommand(protocol, entry) {
+				renames.EnableShellBridge(client)
+			}
+		}
+	}
 	declared := make(map[string]string, len(declaredNames))
 	for _, name := range declaredNames {
 		if wireName, ok := renames.Wire(name); ok {
@@ -327,7 +340,94 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 	}
 	sanitizeToolHistory(payload, protocol, declared, renames, officialToolNameSet(v1))
 	rewriteToolReferences(payload, protocol, renames)
+	if renames.HasShellBridge() {
+		appendExecutableToolPrompt(payload, protocol, renames, officialNames)
+	}
 	return renames, true
+}
+
+func supportsBridgeCommand(protocol wire.Protocol, entry map[string]any) bool {
+	params := entry["parameters"]
+	if protocol == wire.Chat {
+		params = jsonutil.MapAt(entry, "function")["parameters"]
+	}
+	if protocol == wire.Anthropic {
+		params = entry["input_schema"]
+	}
+	parameters, _ := params.(map[string]any)
+	cmd := jsonutil.MapAt(parameters, "properties", "cmd")
+	if jsonutil.StringAt(cmd, "type") != "string" {
+		return false
+	}
+	for _, field := range jsonutil.SliceAt(parameters, "required") {
+		if field != "cmd" {
+			return false
+		}
+	}
+	return true
+}
+
+func appendExecutableToolPrompt(payload map[string]any, protocol wire.Protocol, renames *wire.ToolRenames, names []string) {
+	var executable []string
+	for _, name := range names {
+		if renames.CanExecuteOfficial(name) {
+			executable = append(executable, name)
+		}
+	}
+	const marker = "# Executable tools in this bridged session"
+	reminder := marker + "\n" +
+		"This session executes tools in the client's working directory and permission sandbox. " +
+		"The executable official tools are: " + strings.Join(executable, ", ") + ". " +
+		"Other official tools and their Code Mode catalogs/skills/session-management capabilities are unavailable unless explicitly listed here. Do not call them. " +
+		"Tools with clnt_ names are also executable: call them directly with their own declared schemas, never inside execute. " +
+		"The read bridge supports UTF-8 text and directory entries, with line numbers, offset and limit; images and PDFs require a dedicated available client tool. " +
+		"The filesystem bridge uses python3 and, for glob/grep, rg on the client. If a dependency is missing, use the available shell tool and report the failure. " +
+		"For capabilities without a dedicated executable tool, use the available shell tool when possible. Complete the user's task and provide the final result after tool outputs arrive."
+	appendText := func(text string) string {
+		if strings.Contains(text, marker) {
+			return text
+		}
+		return text + "\n\n" + reminder
+	}
+	switch protocol {
+	case wire.Chat:
+		for _, raw := range jsonutil.SliceAt(payload, "messages") {
+			message, _ := raw.(map[string]any)
+			if jsonutil.StringAt(message, "role") == "system" {
+				if text, ok := message["content"].(string); ok {
+					message["content"] = appendText(text)
+					return
+				}
+			}
+		}
+		payload["messages"] = append(jsonutil.SliceAt(payload, "messages"), map[string]any{"role": "system", "content": reminder})
+	case wire.Responses:
+		payload["instructions"] = appendText(jsonutil.StringAt(payload, "instructions"))
+	case wire.Anthropic:
+		if text, ok := payload["system"].(string); ok {
+			payload["system"] = appendText(text)
+		} else {
+			blocks := jsonutil.SliceAt(payload, "system")
+			for _, raw := range blocks {
+				if strings.Contains(jsonutil.StringAt(raw.(map[string]any), "text"), marker) {
+					return
+				}
+			}
+			payload["system"] = append(blocks, map[string]any{"type": "text", "text": reminder})
+		}
+	}
+}
+
+// sameToolDefinition compares complete JSON objects, ignoring object key order.
+// Encoding also normalizes Go slice/number representations from embedded assets
+// and decoded requests; extra fields and array order remain significant.
+func sameToolDefinition(client, official map[string]any) bool {
+	left, err := jsonutil.Marshal(client)
+	if err != nil {
+		return false
+	}
+	right, err := jsonutil.Marshal(official)
+	return err == nil && bytes.Equal(left, right)
 }
 
 func bindOfficialToolAliases(renames *wire.ToolRenames, declaredNames []string, declaredParams map[string]map[string]any, officialNames []string, v1 bool) {
