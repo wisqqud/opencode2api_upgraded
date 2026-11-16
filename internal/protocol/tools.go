@@ -46,6 +46,9 @@ type ToolRenames struct {
 	// name is never guessed between.
 	byCase  map[string]string
 	byShape map[string]string
+	// responseFilter is explicitly enabled only for requests whose declared
+	// client tools must bound the response. Other contexts keep passthrough.
+	responseFilter bool
 }
 
 // NewToolRenames returns an empty rename set.
@@ -60,11 +63,37 @@ func NewToolRenames() *ToolRenames {
 	}
 }
 
-// Empty reports whether no client-to-wire or official binding was recorded.
-// Identity bindings keep response and history processing active even though
-// Count does not count them as renames.
+// EnableResponseFilter restricts response tool calls to the client tools
+// registered with Add. It is opt-in so rename-only contexts retain passthrough,
+// and it remains active when the client declared no tools.
+func (r *ToolRenames) EnableResponseFilter() {
+	if r != nil {
+		r.responseFilter = true
+	}
+}
+
+// RestrictsResponses reports whether response tool filtering was enabled.
+func (r *ToolRenames) RestrictsResponses() bool {
+	return r != nil && r.responseFilter
+}
+
+// AllowsResponseTool reports whether name resolves to a registered client tool.
+// Nil and rename-only contexts allow every name. An official binding alone is
+// insufficient: its target must also be a client tool recorded with Add.
+func (r *ToolRenames) AllowsResponseTool(name string) bool {
+	if !r.RestrictsResponses() {
+		return true
+	}
+	client, _ := r.Resolve(name)
+	_, declared := r.toWire[client]
+	return declared
+}
+
+// Empty reports whether neither bindings nor response filtering are active.
+// Identity bindings and an enabled filter keep response processing active even
+// though Count does not count them as renames.
 func (r *ToolRenames) Empty() bool {
-	return r == nil || (len(r.toWire) == 0 && len(r.official) == 0)
+	return r == nil || (!r.responseFilter && len(r.toWire) == 0 && len(r.official) == 0)
 }
 
 // Count reports how many client tools have a different wire name. Identity

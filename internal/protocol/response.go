@@ -512,6 +512,7 @@ func mayCarryToolName(body []byte) bool {
 	return bytes.Contains(body, []byte(ClientToolPrefix)) ||
 		bytes.Contains(body, []byte(`"tool_calls"`)) ||
 		bytes.Contains(body, []byte(`"function_call"`)) ||
+		bytes.Contains(body, []byte(`"tool_call"`)) ||
 		bytes.Contains(body, []byte(`"custom_tool_call"`)) ||
 		bytes.Contains(body, []byte(`"tool_use"`)) ||
 		bytes.Contains(body, []byte(`"server_tool_use"`))
@@ -523,9 +524,15 @@ func mayCarryToolName(body []byte) bool {
 // wire-name renaming applied to shaped free-tier requests.
 //
 // mayCarryToolName is only a fast path that skips the unmarshal for frames that
-// cannot contain a tool name; every rewrite is a map lookup after decoding.
-// Names that map to nothing are left alone.
+// cannot contain a tool name. An explicitly enabled response filter also drops
+// calls that do not resolve to a registered client tool.
 func RenameResponseTool(body []byte, protocol Protocol, renames *ToolRenames) []byte {
+	return renameResponseTool(body, protocol, renames, true)
+}
+
+// renameResponseTool can leave filtering to the stateful stream reader while
+// still restoring names and complete argument objects in each event.
+func renameResponseTool(body []byte, protocol Protocol, renames *ToolRenames, filter bool) []byte {
 	if renames.Empty() || len(body) == 0 {
 		return body
 	}
@@ -536,7 +543,14 @@ func RenameResponseTool(body []byte, protocol Protocol, renames *ToolRenames) []
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return body
 	}
-	if !renameToolInMap(payload, protocol, renames) {
+	changed := false
+	if filter && filterResponseToolsInMap(payload, protocol, renames) {
+		changed = true
+	}
+	if renameToolInMap(payload, protocol, renames) {
+		changed = true
+	}
+	if !changed {
 		return body
 	}
 	encoded, err := json.Marshal(payload)
@@ -559,20 +573,48 @@ func renameToolInMap(payload map[string]any, protocol Protocol, renames *ToolRen
 			return false
 		}
 		client, changed := renames.Resolve(name)
-		if !changed {
-			return false
+		if changed {
+			container["name"] = client
 		}
-		container["name"] = client
-		if mapping, ok := renames.OfficialArgs(name); ok {
-			if arguments, ok := container["arguments"].(string); ok {
-				container["arguments"] = RemapArguments(arguments, mapping)
+		// Opaque client aliases already carry the client's argument schema.
+		// Only the original official name selects an argument mapping, even
+		// when Resolve leaves that name unchanged (for example, edit).
+		if _, alias := renames.Client(name); !alias || client == name {
+			if mapping, ok := renames.OfficialArgs(name); ok {
+				if arguments, ok := container["arguments"].(string); ok {
+					if mapped := RemapArguments(arguments, mapping); mapped != arguments {
+						container["arguments"] = mapped
+						changed = true
+					}
+				}
+				if input, ok := container["input"].(map[string]any); ok {
+					mapped := make(map[string]any, len(input))
+					inputChanged := false
+					for key, value := range input {
+						target, known := mapping[key]
+						if !known {
+							mapped[key] = value
+							continue
+						}
+						if target != key {
+							inputChanged = true
+						}
+						if target != "" {
+							mapped[target] = value
+						}
+					}
+					if inputChanged {
+						container["input"] = mapped
+						changed = true
+					}
+				}
 			}
 		}
-		return true
+		return changed
 	}
 	renameItem := func(item map[string]any) bool {
 		switch jsonutil.StringAt(item, "type") {
-		case "function_call", "custom_tool_call":
+		case "function_call", "custom_tool_call", "tool_call":
 			return rename(item)
 		default:
 			return false

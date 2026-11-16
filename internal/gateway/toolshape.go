@@ -259,6 +259,7 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 		return nil, false
 	}
 	renames := wire.NewToolRenames()
+	renames.EnableResponseFilter()
 	used := map[string]bool{}
 	var items []any
 	if raw, exists := payload["tools"]; exists {
@@ -357,8 +358,14 @@ func bindOfficialToolAliases(renames *wire.ToolRenames, declaredNames []string, 
 // listed: an official argument the client does not declare is dropped, because
 // the client tool schema rejects fields it does not know.
 var officialArgAliases = map[string]map[string]string{
-	"bash":  {"command": "cmd"},
-	"shell": {"command": "cmd"},
+	"bash":     {"command": "cmd"},
+	"shell":    {"command": "cmd"},
+	"execute":  {"command": "cmd"},
+	"read":     {"path": "file_path", "filePath": "file_path"},
+	"edit":     {"path": "file_path", "filePath": "file_path", "oldString": "old_string", "newString": "new_string", "replaceAll": "replace_all"},
+	"write":    {"path": "file_path", "filePath": "file_path"},
+	"skill":    {"id": "skill", "name": "skill"},
+	"subagent": {"agent": "subagent_type"},
 }
 
 // officialArgRemap builds the argument mapping from one official tool to the

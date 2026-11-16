@@ -234,15 +234,21 @@ func ForwardStream(ctx context.Context, w http.ResponseWriter, reader io.Reader,
 //
 // It is a pull-based transform instead of a goroutine plus io.Pipe so a client
 // that disconnects mid-stream cannot strand a blocked writer. Chat frames go
-// through the fragment-aware rewriter, while the other protocols use the
-// stateless RenameResponseTool rewrite on each frame.
+// through the fragment-aware rewriter. Shaped requests additionally filter
+// complete SSE records with per-call state; rename-only requests keep the
+// existing lightweight per-line path.
 func RenameStreamReader(reader io.Reader, protocol Protocol, renames *ToolRenames) io.Reader {
 	if renames.Empty() {
 		return reader
 	}
+	var filter *responseToolStreamFilter
+	if renames.RestrictsResponses() {
+		filter = newResponseToolStreamFilter(protocol, renames)
+	}
 	return &renameStreamReader{
 		buffer:  bufio.NewReaderSize(reader, 64<<10),
 		renamer: &streamToolRenamer{protocol: protocol, renames: renames, tools: map[string]*streamToolRenameState{}},
+		filter:  filter,
 	}
 }
 
@@ -252,6 +258,7 @@ func RenameStreamReader(reader io.Reader, protocol Protocol, renames *ToolRename
 type renameStreamReader struct {
 	buffer  *bufio.Reader
 	renamer *streamToolRenamer
+	filter  *responseToolStreamFilter
 	pending []byte
 	err     error
 }
@@ -259,6 +266,9 @@ type renameStreamReader struct {
 // Read returns the rewritten stream bytes, buffering one line at a time.
 func (reader *renameStreamReader) Read(data []byte) (int, error) {
 	for len(reader.pending) == 0 {
+		if reader.filter != nil {
+			return reader.readFiltered(data)
+		}
 		if reader.err != nil {
 			return 0, reader.err
 		}
@@ -367,7 +377,7 @@ func (renamer *streamToolRenamer) rewriteFrame(raw string) []byte {
 		if !mayCarryToolName([]byte(raw)) {
 			return []byte(raw)
 		}
-		return RenameResponseTool([]byte(raw), renamer.protocol, renamer.renames)
+		return renameResponseTool([]byte(raw), renamer.protocol, renamer.renames, false)
 	}
 	if !strings.Contains(raw, `"tool_calls"`) && !strings.Contains(raw, `"finish_reason"`) {
 		return []byte(raw)
@@ -405,7 +415,7 @@ func (renamer *streamToolRenamer) rewriteChatFrame(raw string) []byte {
 				if function == nil {
 					continue
 				}
-				key := fmt.Sprint(jsonutil.FirstAny(call["index"], jsonutil.StringAt(call, "id"), callIndex))
+				key := fmt.Sprint(choiceIndex) + ":" + fmt.Sprint(jsonutil.FirstAny(call["index"], jsonutil.StringAt(call, "id"), callIndex))
 				state := renamer.toolState(key)
 				state.callIndex = jsonutil.FirstAny(call["index"], callIndex)
 				state.choiceIndex = choiceIndex
@@ -563,7 +573,9 @@ func (renamer *streamToolRenamer) pendingCall(state *streamToolRenameState) any 
 	if name == "" {
 		name = state.pending
 	}
-	if name != "" {
+	// A decided name was already emitted in its initial delta. Repeating it
+	// when flushing mapped arguments makes standard clients concatenate it.
+	if name != "" && !state.decided {
 		function["name"] = name
 	}
 	if state.argMapping != nil {
@@ -662,10 +674,8 @@ func (renamer *streamToolRenamer) applyNameFragment(state *streamToolRenameState
 	client, renamed := renamer.renames.Resolve(state.pending)
 	function["name"] = client
 	state.decided, state.renamed, state.resolved = true, renamed, client
-	if renamed {
-		if mapping, ok := renamer.renames.OfficialArgs(state.pending); ok {
-			state.argMapping = mapping
-		}
+	if mapping, ok := renamer.renames.OfficialArgs(state.pending); ok {
+		state.argMapping = mapping
 	}
 	return true
 }
