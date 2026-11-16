@@ -6,6 +6,19 @@ A Go gateway for **OpenCode Zen and Zen Go**. It exposes Chat Completions, Respo
 
 The executable includes the WebUI. Running the service requires no Node.js runtime or database.
 
+## Fork features
+
+This fork of [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) keeps the upstream code and adds:
+
+- **Statistic page** — durable daily token aggregates stored in `statistics.json`, with cumulative and peak tokens, useful sessions, day streaks, a twelve-month activity heatmap, a daily trend, and per-model lifetime usage.
+- **Prompt inject editor** — a Prompt inject tab that edits every part of the official CLI system prompt: the v1 and v2 base prompts, the `<env>` template with `{{model}}`, `{{cwd}}`, `{{workspace}}`, `{{git}}`, `{{platform}}` and `{{date}}`, the skill listing, and trailing extra instructions, with per-part Override switches and a live preview.
+- **OpenCode 2.2.5 / 2.3.0 fixes** — the request fingerprint sync, official tool prefixes, mangled wire tool-name rebuild, and title-request handling from [jy02739245/opencode2iori](https://github.com/jy02739245/opencode2iori).
+- **Windows host identity** — PowerShell wording, a `win32` platform, and Windows host paths in the shaped client identity.
+
+![Statistic page](assets/statistic.png)
+
+![Prompt inject editor](assets/prompt-inject.png)
+
 ## Capabilities
 
 - JSON and SSE responses across all three inference protocols.
