@@ -291,6 +291,7 @@ type Metrics struct {
 	attemptBuckets  [60]attemptBucket
 	recentRequests  upstreamRequestBuffer
 	recentAttempts  upstreamAttemptBuffer
+	statistics      *Statistics
 }
 
 // Monitor creates an empty Metrics whose uptime starts now.
@@ -303,6 +304,12 @@ func Monitor() *Metrics {
 		recentRequests:  upstreamRequestRing(),
 		recentAttempts:  upstreamAttemptRing(),
 	}
+}
+
+// AttachStatistics records every routed request's usage in the durable daily
+// totals as well. It must be called before the monitor serves traffic.
+func (m *Metrics) AttachStatistics(statistics *Statistics) {
+	m.statistics = statistics
 }
 
 // BeginStream records a stream entering its response body phase.
@@ -374,6 +381,7 @@ func (m *Metrics) Record(endpoint string, status int, duration time.Duration, me
 			m.addLifetimeSessionLocked(meta.Session, tokens)
 			addServerKeyUsage(bucket.usageKeys, meta.ServerKeyID, ServerKeyUsage{Requests: 1, TokenCounts: tokens})
 			addServerKeyUsage(m.lifetimeUsage.ServerKeys, meta.ServerKeyID, ServerKeyUsage{Requests: 1, TokenCounts: tokens})
+			m.statistics.Record(meta.Model, meta.Session, tokens)
 		}
 		if meta.Request != "" && meta.Model != "" {
 			request := UpstreamRequest{
@@ -451,19 +459,20 @@ func (m *Metrics) RecordAttempt(attempt UpstreamAttempt) {
 // time since start and Window the last hour, which Series breaks down per
 // minute; the per-endpoint, model, tier and status counts cover the last hour.
 type MonitorSnapshot struct {
-	StartedAt     time.Time         `json:"started_at"`
-	UptimeSeconds int64             `json:"uptime_seconds"`
-	Active        int64             `json:"active_requests"`
-	ActiveStreams int64             `json:"active_streams"`
-	Lifetime      MetricSummary     `json:"lifetime"`
-	Window        MetricSummary     `json:"last_hour"`
-	Series        []MetricSeries    `json:"series"`
-	Endpoints     map[string]uint64 `json:"endpoints"`
-	Models        map[string]uint64 `json:"models"`
-	Tiers         map[string]uint64 `json:"tiers"`
-	Statuses      map[string]uint64 `json:"statuses"`
-	Usage         UsageSnapshot     `json:"usage"`
-	Upstream      UpstreamSnapshot  `json:"upstream"`
+	StartedAt     time.Time          `json:"started_at"`
+	UptimeSeconds int64              `json:"uptime_seconds"`
+	Active        int64              `json:"active_requests"`
+	ActiveStreams int64              `json:"active_streams"`
+	Lifetime      MetricSummary      `json:"lifetime"`
+	Window        MetricSummary      `json:"last_hour"`
+	Series        []MetricSeries     `json:"series"`
+	Endpoints     map[string]uint64  `json:"endpoints"`
+	Models        map[string]uint64  `json:"models"`
+	Tiers         map[string]uint64  `json:"tiers"`
+	Statuses      map[string]uint64  `json:"statuses"`
+	Usage         UsageSnapshot      `json:"usage"`
+	Upstream      UpstreamSnapshot   `json:"upstream"`
+	Statistics    StatisticsSnapshot `json:"statistics"`
 }
 
 // MetricSummary counts requests by result. The latency fields are filled only
@@ -591,8 +600,9 @@ func (m *Metrics) Snapshot() MonitorSnapshot {
 		StartedAt: m.started, UptimeSeconds: int64(time.Since(m.started).Seconds()), Active: m.active.Load(),
 		ActiveStreams: m.activeStreams.Load(), Lifetime: lifetime, Window: window, Series: series,
 		Endpoints: endpoints, Models: models, Tiers: tiers, Statuses: statuses,
-		Usage:    UsageSnapshot{Lifetime: usageLifetime, Window: usageWindow},
-		Upstream: UpstreamSnapshot{Lifetime: upstreamLifetime, Window: upstreamWindow, Requests: recentRequests, Recent: recentAttempts},
+		Usage:      UsageSnapshot{Lifetime: usageLifetime, Window: usageWindow},
+		Upstream:   UpstreamSnapshot{Lifetime: upstreamLifetime, Window: upstreamWindow, Requests: recentRequests, Recent: recentAttempts},
+		Statistics: m.statistics.Snapshot(),
 	}
 }
 

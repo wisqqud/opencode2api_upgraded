@@ -285,6 +285,9 @@ const DICTIONARY = {
       "config.warp.source": "Outer IPv6 source prefix (/64)",
       "config.warp.source.hint":
         "Used only with the IPv6 network stack. Every WARP exit binds one source address from this prefix, so replacing an exit also replaces its public egress; leave empty to share this host's default source address.",
+      "config.warp.connect": "Connect to WARP with",
+      "config.warp.connect.hint":
+        "Optional SOCKS5 proxy (host:port or socks5://host:port) that carries both the registration request and the WireGuard UDP handshake, so WARP can come up when this host cannot reach the Cloudflare endpoint directly. The proxy must support UDP ASSOCIATE, like Cloudflare WARP's own proxy mode; setting it disables the outer IPv6 source prefix.",
       "config.upstream.title": "Upstream and protocol routing",
       "config.upstream.caption":
         "anonymous will use every available proxy; an explicit protocol mapping wins over inferring the protocol from the model name.",
@@ -862,6 +865,9 @@ const DICTIONARY = {
       "config.warp.source": "Tiền tố nguồn IPv6 bên ngoài (/64)",
       "config.warp.source.hint":
         "Chỉ dùng với ngăn xếp mạng IPv6. Mỗi đầu ra WARP gắn một địa chỉ nguồn trong tiền tố này, nên khi thay đầu ra là thay luôn địa chỉ công cộng; để trống sẽ dùng địa chỉ nguồn mặc định của máy chủ.",
+      "config.warp.connect": "Kết nối WARP qua",
+      "config.warp.connect.hint":
+        "Proxy SOCKS5 tùy chọn (host:port hoặc socks5://host:port) dùng cho cả yêu cầu đăng ký lẫn bắt tay UDP của WireGuard, để WARP hoạt động khi máy này không kết nối trực tiếp được tới endpoint của Cloudflare. Proxy phải hỗ trợ UDP ASSOCIATE, như chế độ proxy của chính Cloudflare WARP; khi đặt nó, tiền tố nguồn IPv6 bên ngoài sẽ bị tắt.",
       "config.upstream.title": "Upstream và định tuyến giao thức",
       "config.upstream.caption":
         "anonymous sẽ dùng hết các Proxy khả dụng; ánh xạ protocol tường minh được ưu tiên hơn việc suy luận từ tên mô hình.",
@@ -1450,6 +1456,9 @@ const DICTIONARY = {
       "config.warp.source": "Prefisso sorgente IPv6 esterno (/64)",
       "config.warp.source.hint":
         "Usato solo con lo stack IPv6. Ogni uscita WARP associa un indirizzo sorgente da questo prefisso, quindi sostituire un'uscita sostituisce anche l'indirizzo pubblico; lascia vuoto per usare l'indirizzo sorgente predefinito dell'host.",
+      "config.warp.connect": "Connetti a WARP tramite",
+      "config.warp.connect.hint":
+        "Proxy SOCKS5 opzionale (host:port o socks5://host:port) usato sia per la richiesta di registrazione sia per l'handshake UDP di WireGuard, così WARP si avvia quando questo host non raggiunge direttamente l'endpoint di Cloudflare. Il proxy deve supportare UDP ASSOCIATE, come la modalità proxy del client Cloudflare WARP; impostandolo, il prefisso sorgente IPv6 esterno viene disattivato.",
       "config.upstream.title": "Upstream e instradamento protocolli",
       "config.upstream.caption":
         "anonymous userà ogni proxy disponibile; una mappatura esplicita di protocollo prevale sull'inferenza del protocollo dal nome del modello.",

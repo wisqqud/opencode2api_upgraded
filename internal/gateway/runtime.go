@@ -228,12 +228,16 @@ func (m *RuntimeController) selectWARP(cfg config.Config) (*warp.Pool, string, b
 	if !cfg.Warp.Enabled {
 		return nil, "", false, nil
 	}
-	key := fmt.Sprintf("%d|%s|%s", cfg.Warp.PoolSize, cfg.Warp.Stack, cfg.Warp.SourceIPv6)
+	connectVia, err := warp.ParseConnectVia(cfg.Warp.ConnectVia)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("initialize WARP egress: warp.connect_via: %w", err)
+	}
+	key := fmt.Sprintf("%d|%s|%s|%s", cfg.Warp.PoolSize, cfg.Warp.Stack, cfg.Warp.SourceIPv6, cfg.Warp.ConnectVia)
 	if m.warpPool != nil && m.warpKey == key {
 		return m.warpPool, key, false, nil
 	}
 	var source netip.Prefix
-	if cfg.Warp.SourceIPv6 != "" {
+	if cfg.Warp.SourceIPv6 != "" && connectVia == nil {
 		prefix, err := netip.ParsePrefix(cfg.Warp.SourceIPv6)
 		if err != nil {
 			return nil, "", false, fmt.Errorf("initialize WARP egress: warp.source_ipv6: %w", err)
@@ -253,7 +257,7 @@ func (m *RuntimeController) selectWARP(cfg config.Config) (*warp.Pool, string, b
 	}
 	ctx, cancel := context.WithTimeout(m.root, timeout)
 	defer cancel()
-	pool, err := warp.NewWithOptions(ctx, m.logger, warp.Options{Size: cfg.Warp.PoolSize, Stack: warp.Stack(cfg.Warp.Stack), SourceIPv6: source})
+	pool, err := warp.NewWithOptions(ctx, m.logger, warp.Options{Size: cfg.Warp.PoolSize, Stack: warp.Stack(cfg.Warp.Stack), SourceIPv6: source, ConnectVia: connectVia})
 	if err != nil {
 		return nil, "", false, fmt.Errorf("initialize WARP egress: %w", err)
 	}

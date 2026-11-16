@@ -6,6 +6,7 @@ config.json.bak
 opencode/
 /opencode2api
 /opencode2api.exe
+/o2cserver.exe
 *.log
 .tmp/
 .gocache/
@@ -16,6 +17,8 @@ coverage.out
 
 *.rotation.json
 .rotation-*.tmp
+statistics.json
+.statistics-*.tmp
 
 # Local credentials, deployment backups, and verification artifacts
 .local/

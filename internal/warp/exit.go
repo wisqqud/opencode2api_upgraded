@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -74,14 +75,14 @@ type exit struct {
 }
 
 func newExit(ctx context.Context, reg registration) (*exit, error) {
-	return newExitWithStack(ctx, reg, DefaultStack, netip.Addr{})
+	return newExitWithStack(ctx, reg, DefaultStack, netip.Addr{}, nil)
 }
 
 // newExitWithStack builds one userspace tunnel for reg. A valid source pins
 // the outer WireGuard socket to that address and restricts the peer endpoints
 // to IPv6, so the public egress is derived from the rotating source rather than
 // from whatever address the host happens to share.
-func newExitWithStack(ctx context.Context, reg registration, stack Stack, source netip.Addr) (*exit, error) {
+func newExitWithStack(ctx context.Context, reg registration, stack Stack, source netip.Addr, connectVia *url.URL) (*exit, error) {
 	normalized, err := ParseStack(string(stack))
 	if err != nil {
 		return nil, err
@@ -142,7 +143,15 @@ func newExitWithStack(ctx context.Context, reg registration, stack Stack, source
 		// shared address the prefix was supposed to avoid.
 		endpoints = preferIPv6Endpoints(endpoints)
 	}
-	wg := device.NewDevice(tunDevice, &simpleBind{source: source}, device.NewLogger(device.LogLevelError, "warp: "))
+	// A SOCKS5 connect-via replaces the direct outer socket: every WARP
+	// datagram (handshake and data) leaves through the proxy, and the source
+	// pin does not apply because the proxy chooses the route.
+	var wg *device.Device
+	if connectVia != nil {
+		wg = device.NewDevice(tunDevice, &socksBind{proxy: connectVia}, device.NewLogger(device.LogLevelError, "warp: "))
+	} else {
+		wg = device.NewDevice(tunDevice, &simpleBind{source: source}, device.NewLogger(device.LogLevelError, "warp: "))
+	}
 	uapi := fmt.Sprintf(
 		"private_key=%s\npublic_key=%s\nallowed_ip=0.0.0.0/0\nallowed_ip=::/0\nendpoint=%s\npersistent_keepalive_interval=25\n",
 		privateKey, peerKey, endpoints[0],

@@ -76,7 +76,7 @@ func probePayload(model string, protocol wire.Protocol, effort string, v1 bool) 
 	if err != nil {
 		return nil, err
 	}
-	shaped, _ := prepareAnonymousBody(b, protocol, v1)
+	shaped, _ := prepareAnonymousBody(b, protocol, v1, config.PromptConfig{})
 	return shaped, nil
 }
 
