@@ -31,6 +31,16 @@ const HASH_ALIASES = {
 
 let current = null;
 let monitorTimer = null;
+const LOGIN_USER_KEY = "opencode2api.ui.login-user";
+
+function loginField() {
+  return $("#login-pass").closest(".login-field");
+}
+
+function clearLoginError() {
+  $("#login-error").textContent = "";
+  loginField().classList.remove("has-error");
+}
 
 function renderPageHeader(page) {
   if (!page) return;
@@ -56,7 +66,13 @@ function showLogin() {
   clearCsrf();
   store.clear();
   closeDialogs();
+  clearLoginError();
   $$("input[type='password']").forEach((input) => (input.value = ""));
+  const remembered = localStorage.getItem(LOGIN_USER_KEY);
+  if (remembered) {
+    $("#login-user").value = remembered;
+    $("#login-remember").checked = true;
+  }
   current?.hide?.();
   current = null;
   $("#app").classList.add("hidden");
@@ -119,23 +135,51 @@ $("#logout").addEventListener("click", async () => {
 
 $("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  $("#login-error").textContent = "";
+  clearLoginError();
   try {
+    const username = $("#login-user").value;
     const session = await api("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username: $("#login-user").value, password: $("#login-pass").value }),
+      body: JSON.stringify({ username, password: $("#login-pass").value }),
     });
+    if ($("#login-remember").checked) localStorage.setItem(LOGIN_USER_KEY, username);
+    else localStorage.removeItem(LOGIN_USER_KEY);
     $("#login-pass").value = "";
     await enterConsole(session);
   } catch (error) {
     $("#login-error").textContent = error.message;
+    loginField().classList.add("has-error");
   }
 });
+
+$("#login-pass").addEventListener("input", clearLoginError);
+
+$("#login-eye").addEventListener("click", () => {
+  const pass = $("#login-pass");
+  const visible = pass.type === "password";
+  pass.type = visible ? "text" : "password";
+  $("#login-eye").classList.toggle("is-visible", visible);
+  $("#login-eye").setAttribute("aria-pressed", String(visible));
+  $("#login-eye").setAttribute(
+    "aria-label",
+    visible ? i18n.t("隐藏密码", "login.hidePassword") : i18n.t("显示密码", "login.showPassword"),
+  );
+});
+
+$("#login-forgot").addEventListener("click", () =>
+  toast(i18n.t("请在配置文件中修改密码。", "login.forgotHint")),
+);
 
 i18n.onChange(() => {
   renderPageHeader(current);
   logstream.syncPauseButton();
   logstream.render();
+  $("#login-eye").setAttribute(
+    "aria-label",
+    $("#login-pass").type === "password"
+      ? i18n.t("显示密码", "login.showPassword")
+      : i18n.t("隐藏密码", "login.hidePassword"),
+  );
 });
 
 i18n.init();

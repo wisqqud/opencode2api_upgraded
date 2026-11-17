@@ -13,10 +13,21 @@ WebUI quản trị được nhúng trong tệp thực thi, không cần Node.js 
 - **Trang Chat thử nghiệm** — `#chat` thay Playground cũ bằng hội thoại thật qua Gateway: prompt hệ thống, danh sách hội thoại, sửa tin nhắn, tạo lại câu trả lời, chọn giao thức/mô hình/key/đường truyền, tham số lấy mẫu và suy luận, xem trước yêu cầu, xuất/nhập JSON.
 - **Trang thống kê** — tổng hợp token hằng ngày bền vững trong `statistics.json` với token lũy kế/đỉnh, số phiên, chuỗi ngày, heatmap hoạt động mười hai tháng, xu hướng ngày và mức dùng trọn đời theo mô hình.
 - **Trình sửa prompt inject** — sửa mọi phần prompt hệ thống chính thức (base v1/v2, mẫu `<env>`, danh sách skill, chỉ dẫn cuối) với công tắc ghi đè từng phần và xem trước trực tiếp.
+- **Trang đăng nhập nền mây** — giao diện đăng nhập tối mới với nền mây, hiện/ẩn mật khẩu, ghi nhớ tài khoản và nút đăng xuất cố định ở chân sidebar.
 - **Phiên quản trị bền vững** — phiên lưu trong `config.json.sessions.json` dưới dạng digest token nên khởi động lại không đăng xuất; `webui.session_ttl_minutes` mặc định 30 ngày.
 - **Sửa fingerprint OpenCode 2.2.5 / 2.3.0** — danh tính yêu cầu, TLS hello, tiền tố công cụ chính thức và dựng lại tên công cụ trên wire, từ [jy02739245/opencode2iori](https://github.com/jy02739245/opencode2iori).
 - **Nhận dạng máy chủ Windows** — cách diễn đạt PowerShell, nền tảng `win32` và đường dẫn Windows trong danh tính client.
 - **WARP và proxy mở rộng** — egress WARP SOCKS5 qua `connect_via` và gắn proxy theo key trên nền proxy pool của upstream.
+
+## Ảnh chụp màn hình
+
+**Trang đăng nhập**
+
+![Trang đăng nhập](assets/login.png)
+
+**Trang thống kê**
+
+![Trang thống kê](assets/statistic.png)
 
 ## Nhà tài trợ
 

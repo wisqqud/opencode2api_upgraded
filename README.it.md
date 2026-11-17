@@ -13,10 +13,21 @@ La WebUI di gestione è inclusa nell'eseguibile: per eseguirlo non servono Node.
 - **Pagina Chat di prova** — `#chat` sostituisce il vecchio Playground con una conversazione reale attraverso il Gateway: prompt di sistema, elenco conversazioni, modifica dei messaggi, rigenerazione, scelta di protocollo/modello/chiave/percorso, parametri di campionamento e ragionamento, anteprima della richiesta, esportazione/importazione JSON.
 - **Pagina Statistiche** — aggregati giornalieri dei token persistenti in `statistics.json` con token cumulativi e di picco, sessioni, serie, heatmap di attività su dodici mesi, andamento giornaliero e uso storico per modello.
 - **Editor del prompt inject** — modifica ogni parte del prompt di sistema ufficiale (base v1/v2, template `<env>`, elenco skill, istruzioni finali) con override per parte e anteprima live.
+- **Pagina di accesso con sfondo nuvoloso** — nuova interfaccia scura, mostra/nascondi password, nome utente memorizzato e pulsante di uscita fisso in fondo alla sidebar.
 - **Sessioni amministrative persistenti** — le sessioni sono in `config.json.sessions.json` come digest dei token, quindi un riavvio non disconnette; `webui.session_ttl_minutes` vale 30 giorni per default.
 - **Correzioni fingerprint OpenCode 2.2.5 / 2.3.0** — identità della richiesta, TLS hello, prefissi degli strumenti ufficiali e ricostruzione dei nomi sul wire da [jy02739245/opencode2iori](https://github.com/jy02739245/opencode2iori).
 - **Identità host Windows** — dizione PowerShell, piattaforma `win32` e percorsi Windows nell'identità del client.
 - **WARP e proxy estesi** — uscita WARP SOCKS5 tramite `connect_via` e binding proxy per chiave sopra il pool proxy dell'upstream.
+
+## Screenshot
+
+**Pagina di accesso**
+
+![Pagina di accesso](assets/login.png)
+
+**Pagina Statistiche**
+
+![Pagina Statistiche](assets/statistic.png)
 
 ## Sponsor
 

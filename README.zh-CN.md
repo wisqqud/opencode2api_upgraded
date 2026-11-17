@@ -13,10 +13,21 @@
 - **Chat 测试页** — `#chat` 取代旧 Playground，直接通过网关进行真实流式对话：系统提示词、会话列表、消息编辑、重新生成、协议/模型/密钥/线路选择、采样与推理参数、请求预览，以及 JSON 导出/导入。
 - **统计页** — 将每日 Token 聚合持久化到 `statistics.json`，提供累计/峰值 Token、会话数、连胜、十二个月活动热力图、每日趋势及单模型历史用量。
 - **提示词注入编辑器** — 可编辑官方 CLI 系统提示词的各个部分（v1/v2 基础提示词、`<env>` 模板、技能列表、尾部指令），支持逐项覆盖与实时预览。
+- **云背景登录页** — 全新深色云雾登录界面，支持密码显示切换、记住账号，并在侧边栏底部固定退出按钮。
 - **管理会话持久化** — 会话以 Token 摘要保存在 `config.json.sessions.json`，重启后无需重新登录；`webui.session_ttl_minutes` 默认 30 天。
 - **OpenCode 2.2.5 / 2.3.0 指纹修复** — 请求身份、TLS hello、官方工具前缀与线上工具名重建，来自 [jy02739245/opencode2iori](https://github.com/jy02739245/opencode2iori)。
 - **Windows 主机身份** — 按 PowerShell 措辞、`win32` 平台与 Windows 主机路径塑造客户端身份。
 - **WARP 与代理扩展** — 在上游代理池之上支持 `connect_via` SOCKS5 WARP 出口和按 Key 绑定代理。
+
+## 界面截图
+
+**登录页**
+
+![登录页](assets/login.png)
+
+**统计页**
+
+![统计页](assets/statistic.png)
 
 ## 赞助商
 

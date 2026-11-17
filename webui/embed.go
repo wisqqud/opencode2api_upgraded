@@ -7,5 +7,5 @@ import (
 
 // Assets contains the static management interface served by the admin listener.
 //
-//go:embed index.html css js
+//go:embed index.html css js assets
 var Assets embed.FS

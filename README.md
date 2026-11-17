@@ -13,10 +13,21 @@ The executable embeds the management WebUI. Running it requires neither Node.js 
 - **Chat test page** — `#chat` replaces the old Playground with a real streaming conversation through the Gateway: system prompt, saved conversation list, message editing, answer regeneration, protocol/model/key/relay selection, sampling and reasoning controls, request preview, and JSON export/import.
 - **Statistic page** — durable daily token aggregates in `statistics.json` with cumulative and peak tokens, sessions, streaks, a twelve-month activity heatmap, a daily trend, and per-model lifetime usage.
 - **Prompt inject editor** — edits every part of the official CLI system prompt (v1/v2 base prompts, the `<env>` template, the skill listing, trailing instructions) with per-part overrides and a live preview.
+- **Cloud sign-in page** — redesigned admin login with a dark cloud backdrop, password reveal, remembered username, and a Sign out button pinned to the sidebar footer.
 - **Persistent admin sessions** — sessions are kept in `config.json.sessions.json` as token digests, so a restart does not sign the operator out; `webui.session_ttl_minutes` defaults to 30 days.
 - **OpenCode 2.2.5 / 2.3.0 fingerprint fixes** — request identity, TLS hello, official tool prefixes, and wire tool-name rebuilding from [jy02739245/opencode2iori](https://github.com/jy02739245/opencode2iori).
 - **Windows host identity** — PowerShell wording, a `win32` platform, and Windows host paths in the shaped client identity.
 - **WARP and proxy extras** — SOCKS5 WARP egress through `connect_via` and per-key proxy bindings on top of the upstream proxy pool.
+
+## Screenshots
+
+**Sign-in page**
+
+![Sign-in page](assets/login.png)
+
+**Statistic page**
+
+![Statistic page](assets/statistic.png)
 
 ## Sponsors
 
