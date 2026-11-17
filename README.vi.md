@@ -406,7 +406,7 @@ Timeout header cho mỗi lần thử bị chặn trên bởi timeout của reque
 | `webui.username`              | Bắt buộc khi bật WebUI; file mẫu dùng `admin`.          |
 | `webui.password`              | Mật khẩu khởi tạo, tối thiểu 10 ký tự.                  |
 | `webui.password_hash`         | Hash Argon2id được sinh ra; thay thế mật khẩu văn bản thuần. |
-| `webui.session_ttl_minutes`   | `720`; khoảng 5–10.080.                                 |
+| `webui.session_ttl_minutes`   | `43200`; khoảng 5–43.200.                               |
 
 Khi khởi động, mật khẩu khởi tạo được băm và gỡ khỏi cấu hình. Bản sao lưu chứa bản văn bản thuần đó bị xoá. Hãy giữ file cấu hình và bản sao lưu ở chế độ riêng tư: upstream key và credential proxy vẫn là bí mật cấu hình cần thiết.
 

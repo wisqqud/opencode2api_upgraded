@@ -69,50 +69,40 @@ func (a *Server) handleDebugModels(w http.ResponseWriter, _ *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"models": models, "keys": keys, "metadata": metadata, "catalog": catalog, "relays": relays, "last_inference": last})
 }
 
-// handleDebugInference runs a request through the gateway itself, in process
-// and always non-streaming, and reports what happened. Auto mode follows
-// normal routing; selected mode pins one upstream key and disables failover,
-// so the verdict describes that key alone. The request is authenticated with
-// the first enabled server key, which the gateway accounts to the Playground
-// bucket, and the result is kept for handleDebugModels.
-func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
-	if !a.allowDebug(clientIP(r)) {
-		writeAdminError(w, http.StatusTooManyRequests, "debug_rate_limited", "too many Playground requests; retry in one minute")
-		return
-	}
-	var input DebugInferenceRequest
-	if err := decodeAdminJSON(w, r, &input); err != nil {
-		writeAdminError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
-	}
+// buildDebugRequest validates one Playground or Chat request and turns it into
+// an in-process Gateway request. It writes the error response and returns ok
+// false when validation fails. Auto mode follows normal routing; selected mode
+// pins one upstream key and disables failover, so a verdict describes that key
+// alone. The request is authenticated with the first enabled server key, which
+// the gateway accounts to the Playground bucket.
+func (a *Server) buildDebugRequest(w http.ResponseWriter, r *http.Request, input *DebugInferenceRequest, stream bool) (request *http.Request, route modelcatalog.RouteDiagnostic, selectedKey *gateway.DebugKeyView, ok bool) {
 	if !protocol.Valid(input.Protocol) {
 		writeAdminError(w, http.StatusBadRequest, "invalid_protocol", "protocol must be chat, responses, or anthropic")
-		return
+		return nil, route, nil, false
 	}
 	if input.Request == nil {
 		writeAdminError(w, http.StatusBadRequest, "invalid_request", "request must be a JSON object")
-		return
+		return nil, route, nil, false
 	}
 	payload := jsonutil.CloneMap(input.Request)
-	payload["stream"] = false
+	payload["stream"] = stream
 	model := jsonutil.StringAt(payload, "model")
 	if model == "" {
 		writeAdminError(w, http.StatusBadRequest, "invalid_request", "request.model is required")
-		return
+		return nil, route, nil, false
 	}
 	if input.Key.Mode == "" {
 		input.Key.Mode = "auto"
 	}
 	if input.Key.Mode != "auto" && input.Key.Mode != "selected" {
 		writeAdminError(w, http.StatusBadRequest, "invalid_key_mode", "key.mode must be auto or selected")
-		return
+		return nil, route, nil, false
 	}
-	var selectedKey *gateway.DebugKeyView
 	if input.Key.Mode == "selected" {
 		selectedKey = a.manager.DebugKey(input.Key.Tier, input.Key.ID)
 		if selectedKey == nil {
 			writeAdminError(w, http.StatusBadRequest, "unknown_key_id", "selected key is not configured")
-			return
+			return nil, route, nil, false
 		}
 	}
 	if !input.Relay.Empty() {
@@ -129,35 +119,35 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 		}
 		if !known {
 			writeAdminError(w, http.StatusBadRequest, "unknown_relay", "relay.index or relay.name does not match a configured relay")
-			return
+			return nil, route, nil, false
 		}
 	}
-	route := a.manager.DebugRoute(model, input.Protocol)
+	route = a.manager.DebugRoute(model, input.Protocol)
 	if selectedKey != nil {
 		selected, routeErr := a.manager.DebugRouteForTier(model, selectedKey.Tier)
 		if routeErr != nil {
 			writeAdminError(w, http.StatusBadRequest, "model_unavailable_for_key_tier", routeErr.Error())
-			return
+			return nil, route, nil, false
 		}
 		route = selected
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		writeAdminError(w, http.StatusBadRequest, "invalid_request", "request contains unsupported JSON values")
-		return
+		return nil, route, nil, false
 	}
 	path := protocol.Path(input.Protocol)
 	trace := &telemetry.RequestMeta{}
 	ctx := telemetry.WithRequestMeta(gateway.WithDiagnosticRequest(r.Context()), trace)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://gateway.local"+path, bytes.NewReader(encoded))
+	request, err = http.NewRequestWithContext(ctx, http.MethodPost, "http://gateway.local"+path, bytes.NewReader(encoded))
 	if err != nil {
 		writeAdminError(w, http.StatusInternalServerError, "debug_request_failed", "could not construct Gateway request")
-		return
+		return nil, route, nil, false
 	}
 	cfg := a.manager.Config()
 	if cfg.FirstEnabledServerKey() == "" {
 		writeAdminError(w, http.StatusServiceUnavailable, "debug_unavailable", "no local server key is configured")
-		return
+		return nil, route, nil, false
 	}
 	request.Header.Set("Authorization", "Bearer "+cfg.FirstEnabledServerKey())
 	if !input.Relay.Empty() {
@@ -167,12 +157,33 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 		request = request.WithContext(gateway.WithDebugKeyOverride(request.Context(), gateway.DebugKeyOverride{Tier: selectedKey.Tier, KeyID: selectedKey.ID}))
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
 	// A Playground request is not a conversation: it replays the same prompt on
 	// every click, so a session derived from the prompt stays one bucket until
 	// it is charged and every later click answers 429 while live traffic
 	// succeeds. A fresh session per click keeps the bench on its own bucket.
 	request.Header.Set("x-opencode-session", benchSession())
+	return request, route, selectedKey, true
+}
+
+// handleDebugInference runs a request through the gateway itself, in process
+// and always non-streaming, and reports what happened. The result is kept for
+// handleDebugModels.
+func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
+	if !a.allowDebug(clientIP(r)) {
+		writeAdminError(w, http.StatusTooManyRequests, "debug_rate_limited", "too many Playground requests; retry in one minute")
+		return
+	}
+	var input DebugInferenceRequest
+	if err := decodeAdminJSON(w, r, &input); err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	request, route, selectedKey, ok := a.buildDebugRequest(w, r, &input, false)
+	if !ok {
+		return
+	}
+	trace := telemetry.MetaFromContext(request.Context())
+	request.Header.Set("Accept", "application/json")
 	recorder := debugResponseRecorder()
 	started := time.Now()
 	a.manager.Handler().ServeHTTP(recorder, request)
@@ -208,6 +219,33 @@ func (a *Server) handleDebugInference(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, result)
+}
+
+// handleDebugChat streams one interactive Chat request through the gateway. It
+// is the streaming counterpart of handleDebugInference: the payload is always
+// streamed, the answer is written to the caller as it arrives, and the same
+// routing, key selection and rate limit apply. Errors raised before the
+// gateway runs are JSON; a Gateway-level error keeps its own status and body.
+func (a *Server) handleDebugChat(w http.ResponseWriter, r *http.Request) {
+	if !a.allowDebug(clientIP(r)) {
+		writeAdminError(w, http.StatusTooManyRequests, "debug_rate_limited", "too many chat requests; retry in one minute")
+		return
+	}
+	var input DebugInferenceRequest
+	if err := decodeAdminJSON(w, r, &input); err != nil {
+		writeAdminError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	request, _, _, ok := a.buildDebugRequest(w, r, &input, true)
+	if !ok {
+		return
+	}
+	request.Header.Set("Accept", "text/event-stream")
+	// SSE must not sit in a reverse proxy buffer: the chat paints each frame as
+	// it arrives, and a buffered stream looks frozen until the answer ends.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	a.manager.Handler().ServeHTTP(w, request)
 }
 
 // debugResponseCapture is a minimal http.ResponseWriter that keeps the status

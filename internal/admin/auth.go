@@ -83,6 +83,7 @@ func (a *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		a.removeEarliestSessionLocked()
 	}
 	a.sessions[tokenDigest(token)] = adminSession{Username: cfg.WebUI.Username, AuthVersion: config.Fingerprint(cfg.WebUI.PasswordHash), CSRF: csrf, Expires: expires}
+	a.persistSessionsLocked()
 	a.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: int(time.Until(expires).Seconds()), Secure: requestIsSecure(r)})
 	w.Header().Set("Cache-Control", "no-store")
@@ -105,6 +106,7 @@ func (a *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie != nil {
 		a.mu.Lock()
 		delete(a.sessions, tokenDigest(cookie.Value))
+		a.persistSessionsLocked()
 		a.mu.Unlock()
 		a.cancelGoAuth(tokenDigest(cookie.Value))
 	}
@@ -214,6 +216,7 @@ func (a *Server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	a.sessions = make(map[string]adminSession)
+	a.persistSessionsLocked()
 	a.mu.Unlock()
 	a.cancelGoAuth("")
 	http.SetCookie(w, &http.Cookie{Name: adminCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: -1, Secure: requestIsSecure(r)})

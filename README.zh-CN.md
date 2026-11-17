@@ -455,7 +455,7 @@ SSE 响应打开期间，空闲达到该秒数后会写入一条 `: keepalive` �
 | `webui.username`              | 启用 WebUI 时必填；示例为 `admin`。             |
 | `webui.password`              | 首次初始化密码，最小长度为 10。                 |
 | `webui.password_hash`         | 自动生成的 Argon2id 哈希，用于替代明文密码。    |
-| `webui.session_ttl_minutes`   | `720`；范围为 5–10,080。                        |
+| `webui.session_ttl_minutes`   | `43200`；范围为 5–43,200。                        |
 
 启动时会将初始密码哈希化，并从配置中删除明文；包含初始明文密码的备份也会删除。配置和备份仍包含运行所需的上游 Key、代理凭据，应限制文件访问权限。
 

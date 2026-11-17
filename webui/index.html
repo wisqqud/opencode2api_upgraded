@@ -53,6 +53,7 @@
           <div class="nav-group">
             <div class="nav-group-title" data-i18n="nav.group.runtime">运行</div>
             <button class="nav-item active" data-page="overview" data-i18n="nav.overview">概览</button>
+            <button class="nav-item" data-page="chat" data-i18n="nav.chat">Chat</button>
             <button class="nav-item" data-page="diagnostics" data-i18n="nav.diagnostics">诊断</button>
           </div>
           <div class="nav-group">
@@ -345,94 +346,160 @@
             </div>
           </section>
 
-          <section id="page-diagnostics" class="page hidden">
-            <div class="tabs" role="tablist" aria-label="诊断视图">
-              <button class="tab active" data-tab="playground" role="tab" aria-selected="true" data-i18n="diagnostics.tab.playground">请求测试</button>
-              <button class="tab" data-tab="ledger" role="tab" aria-selected="false" data-i18n="diagnostics.tab.ledger">请求流水</button>
-              <button class="tab" data-tab="logs" role="tab" aria-selected="false" data-i18n="diagnostics.tab.logs">事件流</button>
-              <button class="tab" data-tab="route" role="tab" aria-selected="false" data-i18n="diagnostics.tab.route">路由与资格</button>
-            </div>
-            <div data-panel="playground" class="stack" role="tabpanel">
-              <div class="play-layout">
-                <form id="play-form" class="section">
-                  <div class="section-head">
-                    <div>
-                      <h2 class="section-title" data-i18n="playground.title">三协议请求台</h2>
-                      <p class="section-caption" data-i18n="playground.caption">服务端强制非流式，并经由真实 Gateway 路由。</p>
-                    </div>
+          <section id="page-chat" class="page hidden">
+            <div class="chat-shell">
+              <aside class="chat-rail" aria-label="Chat settings">
+                <section class="chat-rail-block">
+                  <div class="chat-rail-head">
+                    <h2 class="chat-rail-title">Request</h2>
+                    <button id="chat-new" type="button" class="btn btn-sm btn-ghost">New chat</button>
                   </div>
-                  <div class="form-grid">
+                  <div class="field">
+                    <label for="chat-protocol">Protocol</label>
+                    <select id="chat-protocol">
+                      <option value="chat">Chat Completions</option>
+                      <option value="responses">Responses</option>
+                      <option value="anthropic">Anthropic Messages</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="chat-model">Model</label>
+                    <select id="chat-model"></select>
+                  </div>
+                  <div class="field">
+                    <label for="chat-key">Upstream key</label>
+                    <select id="chat-key">
+                      <option value="auto">Auto routing (anonymous / tier fallback / key rotation)</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="chat-relay">Relay</label>
+                    <select id="chat-relay">
+                      <option value="auto">Any relay (normal routing)</option>
+                    </select>
+                  </div>
+                </section>
+
+                <section class="chat-rail-block">
+                  <div class="chat-rail-head">
+                    <h2 class="chat-rail-title">System prompt</h2>
+                    <span id="chat-system-count" class="prompt-count">0 chars</span>
+                  </div>
+                  <textarea
+                    id="chat-system"
+                    class="chat-system"
+                    rows="6"
+                    spellcheck="false"
+                    placeholder="Optional. Sent as the system message on every turn."
+                  ></textarea>
+                </section>
+
+                <section class="chat-rail-block">
+                  <div class="chat-rail-head">
+                    <h2 class="chat-rail-title">Sampling</h2>
+                  </div>
+                  <div class="chat-inline">
                     <div class="field">
-                      <label for="play-protocol" data-i18n="playground.protocol">入口协议</label>
-                      <select id="play-protocol">
-                        <option value="chat">Chat Completions</option>
-                        <option value="responses">Responses</option>
-                        <option value="anthropic">Anthropic Messages</option>
-                      </select>
+                      <label for="chat-temperature">Temperature</label>
+                      <input id="chat-temperature" type="number" min="0" max="2" step="0.1" placeholder="default" />
                     </div>
                     <div class="field">
-                      <label for="play-model" data-i18n="playground.model">模型</label>
-                      <select id="play-model"></select>
-                    </div>
-                    <div class="field full">
-                      <label for="play-key" data-i18n="playground.key">上游 Key</label>
-                      <select id="play-key">
-                        <option value="auto" data-i18n="playground.key.auto">
-                          自动路由（匿名 / Tier 回退 / Key 轮询）
-                        </option>
-                      </select>
-                      <p class="section-caption" data-i18n="playground.key.caption">
-                        指定 Key 后只测试该 Key：不切换、不回退，也不改变冷却与代理健康。
-                      </p>
-                    </div>
-                    <div class="field full">
-                      <label for="play-relay" data-i18n="playground.relay">Relay</label>
-                      <select id="play-relay">
-                        <option value="auto" data-i18n="playground.relay.auto">
-                          任意 Relay（正常路由）
-                        </option>
-                      </select>
-                      <p class="section-caption" data-i18n="playground.relay.caption">
-                        指定 Relay 后只经它发送一次尝试：真实 session、system prompt 与 tool shaping，不切换、不回退，也不改变冷却与代理健康。
-                      </p>
+                      <label for="chat-max-tokens">Max tokens</label>
+                      <input id="chat-max-tokens" type="number" min="1" step="1" placeholder="auto" />
                     </div>
                   </div>
                   <div class="field">
-                    <label for="play-request" data-i18n="playground.request">请求 JSON</label>
-                    <textarea id="play-request" class="json-editor" spellcheck="false"></textarea>
+                    <label for="chat-effort">Reasoning effort</label>
+                    <select id="chat-effort">
+                      <option value="">Model default</option>
+                      <option value="minimal">minimal</option>
+                      <option value="low">low</option>
+                      <option value="medium">medium</option>
+                      <option value="high">high</option>
+                      <option value="xhigh">xhigh</option>
+                      <option value="max">max</option>
+                    </select>
                   </div>
-                  <div class="actions">
-                    <button id="play-reset" type="button" class="btn btn-sm btn-ghost" data-i18n="playground.reset">
-                      重置模板
+                  <label class="check">
+                    <input id="chat-stream" type="checkbox" checked />
+                    <span>Stream the answer</span>
+                  </label>
+                  <label class="check">
+                    <input id="chat-show-reasoning" type="checkbox" checked />
+                    <span>Show reasoning blocks</span>
+                  </label>
+                </section>
+
+                <section class="chat-rail-block">
+                  <div class="chat-rail-head">
+                    <h2 class="chat-rail-title">Conversations</h2>
+                  </div>
+                  <div id="chat-conversations" class="chat-conversations"></div>
+                </section>
+
+                <section class="chat-rail-block chat-rail-actions">
+                  <button id="chat-export" type="button" class="btn btn-sm btn-ghost">Export</button>
+                  <button id="chat-import" type="button" class="btn btn-sm btn-ghost">Import</button>
+                  <input id="chat-import-file" type="file" accept="application/json" class="hidden" />
+                  <button id="chat-preview-toggle" type="button" class="btn btn-sm btn-ghost">Request JSON</button>
+                  <button id="chat-clear" type="button" class="btn btn-sm btn-danger">Clear chat</button>
+                </section>
+              </aside>
+
+              <section class="chat-main" aria-label="Conversation">
+                <header class="chat-head">
+                  <div class="chat-head-info">
+                    <span id="chat-title" class="chat-head-title">New conversation</span>
+                    <span id="chat-meta" class="chat-head-meta">0 messages</span>
+                  </div>
+                  <div class="chat-head-actions">
+                    <button id="chat-scroll-bottom" type="button" class="btn btn-sm btn-ghost hidden">
+                      Jump to latest
                     </button>
-                    <button id="play-run" class="btn btn-sm btn-primary" data-i18n="playground.run">
-                      发送诊断请求
+                    <button id="chat-retry-last" type="button" class="btn btn-sm btn-ghost">
+                      Regenerate
                     </button>
+                  </div>
+                </header>
+
+                <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+                <div id="chat-empty" class="chat-empty">
+                  <p class="chat-empty-title">Test the gateway with a real conversation.</p>
+                  <p class="chat-empty-caption">
+                    Every turn goes through the live route with the same prompt, tool shaping and key
+                    selection as production traffic.
+                  </p>
+                  <div id="chat-suggestions" class="chat-suggestions"></div>
+                </div>
+
+                <details id="chat-preview" class="chat-preview hidden">
+                  <summary>Request preview</summary>
+                  <pre id="chat-preview-body"></pre>
+                </details>
+
+                <form id="chat-composer" class="chat-composer">
+                  <textarea
+                    id="chat-input"
+                    rows="1"
+                    placeholder="Message the model… (Enter sends, Shift+Enter adds a line)"
+                  ></textarea>
+                  <div class="chat-composer-actions">
+                    <span id="chat-composer-hint" class="chat-composer-hint"></span>
+                    <button id="chat-stop" type="button" class="btn btn-sm btn-danger hidden">Stop</button>
+                    <button id="chat-send" type="submit" class="btn btn-sm btn-primary">Send</button>
                   </div>
                 </form>
-                <section class="section">
-                  <div class="section-head">
-                    <div>
-                      <h2 class="section-title" data-i18n="playground.result.title">诊断结果</h2>
-                      <p id="play-state" class="section-caption" data-i18n="playground.result.idle">
-                        尚未发送请求。
-                      </p>
-                    </div>
-                  </div>
-                  <div id="play-facts" class="facts"></div>
-                  <div class="code-card">
-                    <div class="code-head">
-                      <span data-i18n="playground.output">原始响应</span>
-                      <button id="play-copy" type="button" class="btn btn-sm btn-ghost" data-i18n="common.copy">
-                        复制
-                      </button>
-                    </div>
-                    <pre id="play-output">{}</pre>
-                  </div>
-                </section>
-              </div>
+              </section>
             </div>
-            <div data-panel="ledger" class="stack hidden" role="tabpanel">
+          </section>
+
+          <section id="page-diagnostics" class="page hidden">
+            <div class="tabs" role="tablist" aria-label="诊断视图">
+              <button class="tab active" data-tab="ledger" role="tab" aria-selected="true" data-i18n="diagnostics.tab.ledger">请求流水</button>
+              <button class="tab" data-tab="logs" role="tab" aria-selected="false" data-i18n="diagnostics.tab.logs">事件流</button>
+              <button class="tab" data-tab="route" role="tab" aria-selected="false" data-i18n="diagnostics.tab.route">路由与资格</button>
+            </div>
+            <div data-panel="ledger" class="stack" role="tabpanel">
               <section class="section">
                 <div class="section-head">
                   <div>

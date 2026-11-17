@@ -11,6 +11,8 @@ The executable includes the WebUI. Running the service requires no Node.js runti
 This fork of [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) keeps the upstream code and adds:
 
 - **Statistic page** — durable daily token aggregates stored in `statistics.json`, with cumulative and peak tokens, useful sessions, day streaks, a twelve-month activity heatmap, a daily trend, and per-model lifetime usage.
+- **Chat test page** — `#chat` replaces the old Playground with a real streaming conversation through the Gateway: system prompt, saved conversation list, message editing, answer regeneration, protocol/model/key/relay selection, sampling and reasoning controls, request preview, and JSON export/import.
+- **Persistent sessions** — the WebUI keeps its sessions in `config.json.sessions.json` (token digests only), so restarting the server no longer signs the operator out; the default session lifetime is 30 days.
 - **Prompt inject editor** — a Prompt inject tab that edits every part of the official CLI system prompt: the v1 and v2 base prompts, the `<env>` template with `{{model}}`, `{{cwd}}`, `{{workspace}}`, `{{git}}`, `{{platform}}` and `{{date}}`, the skill listing, and trailing extra instructions, with per-part Override switches and a live preview.
 - **OpenCode 2.2.5 / 2.3.0 fixes** — the request fingerprint sync, official tool prefixes, mangled wire tool-name rebuild, and title-request handling from [jy02739245/opencode2iori](https://github.com/jy02739245/opencode2iori).
 - **Windows host identity** — PowerShell wording, a `win32` platform, and Windows host paths in the shaped client identity.
@@ -28,7 +30,7 @@ This fork of [jasonxu114514/opencode2api](https://github.com/jasonxu114514/openc
 - Optional userspace Cloudflare WARP egress for free-model traffic, without TUN or root.
 - Direct, HTTP, HTTPS, SOCKS5, and SOCKS5H connections, including a proxy file.
 - Dynamic model discovery, native protocol metadata, and disk caches.
-- A separate management port with configuration editing, a Playground, diagnostics, token statistics, and live logs.
+- A separate management port with configuration editing, the chat test page, diagnostics, token statistics, and live logs.
 - Configuration hot reload with validation before switching new requests to a replacement gateway.
 - Go subscription quota dashboard with remaining percentages, reset times, and available models.
 - Local API key creation, naming, enabling, disabling, and deletion with immediate updates.
@@ -477,7 +479,7 @@ The per-attempt header timeout is capped by the request timeout. Set it below th
 | `webui.username`              | Required when the WebUI is enabled; the example uses `admin`. |
 | `webui.password`              | Bootstrap password with a minimum length of 10.               |
 | `webui.password_hash`         | Generated Argon2id hash; replaces the plaintext password.     |
-| `webui.session_ttl_minutes`   | `720`; range 5–10,080.                                        |
+| `webui.session_ttl_minutes`   | `43200`; range 5–43,200.                                      |
 
 On startup, a bootstrap password is hashed and removed from the configuration. The backup containing that bootstrap plaintext is deleted. Keep configuration files and backups private: upstream keys and proxy credentials remain necessary configuration secrets.
 
@@ -485,7 +487,7 @@ Body dumps are opt-in and capped at 64 KiB per prepared body. Configured secrets
 
 ## WebUI and diagnostics
 
-The management listener serves the UI and `/api/*` routes. Authentication uses one administrator account, server-side sessions, HttpOnly/SameSite cookies, CSRF checks for writes, and login throttling.
+The management listener serves the UI and `/api/*` routes. Authentication uses one administrator account, server-side sessions, HttpOnly/SameSite cookies, CSRF checks for writes, and login throttling. Sessions are also written to `config.json.sessions.json` next to the configuration — as SHA-256 token digests, never the cookie itself — so a restart of the process keeps the operator signed in; `webui.session_ttl_minutes` sets the lifetime and defaults to 30 days.
 
 | Management route                                 | Purpose                                                               |
 | ------------------------------------------------ | --------------------------------------------------------------------- |
@@ -497,7 +499,8 @@ The management listener serves the UI and `/api/*` routes. Authentication uses o
 | `PUT /api/account`                               | Update credentials after password verification; invalidates sessions. |
 | `GET /api/monitor`                               | Request, token, upstream, and resource statistics.                    |
 | `GET /api/debug/models`                          | Model routes, key fingerprints, and metadata diagnostics.             |
-| `POST /api/debug/inference`                      | Run a Playground request.                                             |
+| `POST /api/debug/inference`                      | Run one buffered Playground request.                                  |
+| `POST /api/debug/chat`                           | Run one chat turn and stream it back as SSE.                          |
 | `GET /api/logs`, `GET /api/logs/stream`          | Recent logs or a live SSE subscription.                               |
 
 Playground requests require a session and `X-CSRF-Token` and are limited to 12 per minute per client IP:
@@ -514,6 +517,8 @@ Playground requests require a session and `X-CSRF-Token` and are limited to 12 p
 ```
 
 The server forces `stream: false`. Use `{"mode":"selected","tier":"zen","id":"KEY_FINGERPRINT"}` to test a specific key from `/api/debug/models`. A selected request makes at most one upstream attempt, without anonymous access, key rotation, tier fallback, or reasoning replay.
+
+**Chat** (`#chat`) sends the same body to `POST /api/debug/chat` and streams the Gateway's SSE frames back (Chat, Responses, or Anthropic deltas, including reasoning). Turning **Stream** off uses the buffered endpoint instead. Conversations, the system prompt, and sampling settings are stored in the browser's `localStorage` and can be exported and imported as JSON.
 
 **Both automatic and selected diagnostics preserve production key cooldowns, failure counts, proxy health, and bindings.** They still make real upstream requests, can consume provider quota, and appear in monitoring.
 

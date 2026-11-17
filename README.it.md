@@ -396,7 +396,7 @@ Il timeout degli header per tentativo è limitato dal timeout della richiesta. I
 | `webui.username`              | Obbligatorio con WebUI attiva; l'esempio usa `admin`.    |
 | `webui.password`              | Password iniziale, almeno 10 caratteri.                 |
 | `webui.password_hash`         | Hash Argon2id generato, sostituisce la password in chiaro. |
-| `webui.session_ttl_minutes`   | `720`; intervallo 5–10.080.                              |
+| `webui.session_ttl_minutes`   | `43200`; intervallo 5–43.200.                              |
 
 All'avvio, la password iniziale viene sottoposta a hash e rimossa dalla configurazione. Il backup che contiene la password in chiaro viene eliminato. Proteggi i file di configurazione e i backup: le chiavi upstream e le credenziali proxy restano segreti necessari.
 

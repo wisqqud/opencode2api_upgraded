@@ -34,6 +34,7 @@ type Server struct {
 	logger        *slog.Logger
 	mu            sync.Mutex
 	sessions      map[string]adminSession
+	sessionsPath  string
 	attempts      map[string]loginWindow
 	debugAttempts map[string]loginWindow
 	lastInference *DebugInferenceResult
@@ -48,13 +49,22 @@ type Server struct {
 	indexErr  error
 }
 
-// New returns a Server for manager, reporting to monitor and logs.
+// New returns a Server for manager, reporting to monitor and logs. Sessions
+// are kept in a sidecar file next to config.json so a restart of the process
+// does not sign the operator out.
 func New(manager *gateway.RuntimeController, monitor *telemetry.Metrics, logs *telemetry.LogBroker, logger *slog.Logger) *Server {
-	return &Server{
+	sessionsPath := ""
+	if path := manager.ConfigPath(); path != "" {
+		sessionsPath = path + ".sessions.json"
+	}
+	server := &Server{
 		manager: manager, monitor: monitor, logs: logs, logger: logger, sessions: make(map[string]adminSession),
-		attempts: make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow),
+		sessionsPath: sessionsPath,
+		attempts:     make(map[string]loginWindow), debugAttempts: make(map[string]loginWindow),
 		goAuth: make(map[string]*goAuthAttempt), goAuthClient: goauth.NewClient(nil),
 	}
+	server.loadSessions()
+	return server
 }
 
 // Handler returns the management routes: the API under /api/ and the embedded
@@ -92,6 +102,7 @@ func (a *Server) Handler() http.Handler {
 	mux.Handle("PATCH /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleUpdateAPIKey))))
 	mux.Handle("DELETE /api/api-keys/{id}", a.authenticate(a.csrf(http.HandlerFunc(a.handleDeleteAPIKey))))
 	mux.Handle("POST /api/debug/inference", a.authenticate(a.csrf(http.HandlerFunc(a.handleDebugInference))))
+	mux.Handle("POST /api/debug/chat", a.authenticate(a.csrf(http.HandlerFunc(a.handleDebugChat))))
 	mux.Handle("GET /api/logs", a.authenticate(http.HandlerFunc(a.handleLogs)))
 	mux.Handle("GET /api/logs/stream", a.authenticate(http.HandlerFunc(a.handleLogStream)))
 	mux.Handle("/", a.staticHandler())

@@ -52,7 +52,7 @@
     "listen": "0.0.0.0:8081",
     "username": "admin",
     "password": "change-this-admin-password",
-    "session_ttl_minutes": 720
+    "session_ttl_minutes": 43200
   },
   "prefer": "go",
   "reasoning": {

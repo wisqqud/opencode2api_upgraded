@@ -417,7 +417,7 @@ func Load(path string) (Config, error) {
 		Models:      ModelsConfig{RefreshSeconds: 300, Protocols: map[string]string{}},
 		Performance: PerformanceConfig{MaxIdleConns: 2048, MaxIdleConnsPerHost: 256, MaxConnsPerHost: 0, IdleConnTimeoutSeconds: 120, ConnectTimeoutSeconds: 5, FailureCooldownSeconds: 15, StreamKeepaliveSeconds: 15},
 		Logging:     LoggingConfig{Level: "info", RingSize: 2000},
-		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 720},
+		WebUI:       WebUIConfig{Listen: "0.0.0.0:8081", SessionTTLMinutes: 43200},
 		Prefer:      TierGo,
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -560,8 +560,8 @@ func Normalize(path string, cfg Config) (Config, error) {
 		if cfg.WebUI.Password == "" && cfg.WebUI.PasswordHash == "" {
 			return Config{}, errors.New("webui.password is required for first-time setup")
 		}
-		if cfg.WebUI.SessionTTLMinutes < 5 || cfg.WebUI.SessionTTLMinutes > 10080 {
-			return Config{}, errors.New("webui.session_ttl_minutes must be between 5 and 10080")
+		if cfg.WebUI.SessionTTLMinutes < 5 || cfg.WebUI.SessionTTLMinutes > 43200 {
+			return Config{}, errors.New("webui.session_ttl_minutes must be between 5 and 43200")
 		}
 	}
 	for _, raw := range cfg.RuntimeProxies() {

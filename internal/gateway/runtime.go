@@ -325,6 +325,12 @@ func (m *RuntimeController) Config() config.Config {
 	return config.Clone(runtime.config)
 }
 
+// ConfigPath returns the path the runtime loads its configuration from, or an
+// empty string when the controller was built without one.
+func (m *RuntimeController) ConfigPath() string {
+	return m.configPath
+}
+
 // RestartStatus returns the listeners the process bound at startup and the
 // config fields (listen, webui.listen, webui.enabled) whose current value
 // differs from them, i.e. the changes waiting for a restart.

@@ -15,6 +15,7 @@ statistics.json
 *.rotation.json
 .rotation-*.tmp
 *.availability.json
+*.sessions.json
 
 # Logs
 *.log
