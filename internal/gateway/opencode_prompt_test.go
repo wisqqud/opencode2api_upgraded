@@ -29,8 +29,8 @@ func TestOpencodeSystemPromptOverrides(t *testing.T) {
 		CustomSkills: true, Skills: "SKILLS",
 		Extra: "EXTRA",
 	}
-	environment := promptEnvironment{WorkDir: `C:\p`, Workspace: `C:\p`, GitRepo: "yes"}
-	got := opencodeSystemPrompt("opencode/test", true, cfg, environment)
+	environment := promptEnvironment{WorkDir: `C:\p`, Workspace: `C:\p`, GitRepo: "yes", Platform: "win32"}
+	got := opencodeSystemPrompt("opencode/test", true, cfg, environment, nil)
 	want := "BASEcwd=C:\\p;model=test;git=yes;platform=win32\nSKILLS\n\nEXTRA"
 	if got != want {
 		t.Fatalf("prompt = %q, want %q", got, want)
@@ -55,7 +55,7 @@ func TestInjectOfficialPromptUsesClientProject(t *testing.T) {
 		"model":    "opencode/test",
 		"messages": []any{map[string]any{"role": "system", "content": "Current working directory: C:\\work\\demo"}},
 	}
-	if !injectOfficialPrompt(payload, wire.Chat, true, config.PromptConfig{}) {
+	if !injectOfficialPrompt(payload, wire.Chat, true, config.PromptConfig{}, nil) {
 		t.Fatal("prompt was not injected")
 	}
 	messages := payload["messages"].([]any)

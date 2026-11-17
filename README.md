@@ -205,6 +205,8 @@ System One pairs a free-form state with typed questions and returns typed answer
 
 Requests using the upstream's native protocol retain provider-specific fields. Requests crossing protocols pass through a common representation; not every option has an equivalent. For example, Chat JSON output constraints and `seed` are not forwarded to Anthropic Messages. Unsupported content or tool types may be rejected.
 
+When converting Responses history, adjacent assistant reasoning, text, and function-call items form one assistant turn, including text interleaved between function calls. Tool results and user messages separate turns; missing or unmatched tool results remain validation errors when converting to Chat Completions.
+
 The gateway exposes the routes listed above. It does not implement embeddings, file uploads, image generation, or Responses retrieval and cancellation. It does not store conversation history; clients must supply the history or use features supported by the actual upstream.
 
 ## Routing and models
@@ -249,9 +251,13 @@ The routing sequence is:
 
 Anonymous attempts are not cut short by `retry.max_attempts`, but all attempts share the request timeout. Network errors, authentication failures, rate limits, and server errors can rotate exits. A request-level `400`/`413`/`422` (for example `context_length_exceeded`) ends the request immediately: another exit or tier cannot change the request. An IP-level abuse `403` blocks only that exit; if every exit is blocked, the gateway stops walking them, and an authenticated Go key can still serve the request.
 
+If a retry fails before producing an HTTP response, the gateway retains the latest upstream HTTP error instead of replacing it with a transport error. Its status and `Retry-After` are preserved, and up to 64 KiB of its body is retained for the existing error-message conversion. The previous response connection or WARP lease is released before another attempt. A later HTTP response replaces the earlier one, and a client cancellation still takes precedence. This does not change session IDs, retry budgets, or upstream quotas.
+
 When the free tier is blocked for the whole deployment (an IP-level `403` abuse response), retrying only extends the penalty, so an optional lane-level circuit breaker can stop the probing. With `models.anonymous_backoff` configured, `threshold` consecutive failed anonymous attempts or an all-exits IP block pause the whole anonymous lane for `base_hours`, doubling on every further trip up to `max_hours`. A single non-abuse `403` or `429` does not open the breaker; it counts toward the threshold. While paused, requests skip the lane entirely: no proxy is drawn, no upstream request is made, and routing goes straight to the authenticated tiers. Catalog refreshes and availability probes honour the pause as well. When the window expires one request wins the half-open probe; success closes the breaker and restores the free lane, failure opens the next, longer window. The block is absent, and so the breaker stays off, by default.
 
 Requests are encoded for each tier's own protocol. With `performance.first_event_timeout_seconds` enabled, a successful SSE response is held until the first complete data event. A timeout or disconnect before that event uses the existing key/proxy retry budget; comments do not satisfy the timeout. Once released downstream, the stream is never replayed. The default is `0` (disabled); try `15` seconds for upstreams that accept requests but send no events. This bounds the first event, not the first text token, and does not apply to System One. Rotation aliases use their separate `rotation.first_output_seconds` timeout. A recognized stale Responses reasoning reference can trigger one repair pass; selected-key diagnostics never use that replay.
+
+Known OpenCode title requests are identified before prompt and message shaping, so those mutations cannot accidentally add agent tools to a title request or classify an ordinary agent request as a title request. The existing title-pattern and history restrictions still apply; this is not a general fix for every `FreeUsageLimitError`.
 
 When only anonymous access is configured, `/v1/models` exposes only models eligible for that lane.
 
@@ -275,13 +281,32 @@ Every shaped free-model request carries the OpenCode CLI's own system prompt —
 
 The **Prompt inject** tab in Configuration center customizes each part independently: the v1 and v2 base prompts, the `<env>` template (`{{model}}`, `{{cwd}}`, `{{workspace}}`, `{{git}}`, `{{platform}}`, `{{date}}`), the skill listing, and extra instructions appended last. A part without its Override switch keeps the built-in text, and the tab shows a live preview of the composed prompt. Turning injection off entirely is allowed but the free tier may reject the resulting request.
 
+For remote clients, optionally set `upstream.prompt_environment` to replace the injected environment values without removing fields, changing their order, or modifying the official base prompt:
+
+```json
+{
+  "upstream": {
+    "prompt_environment": {
+      "working_directory": "/workspace",
+      "workspace_root": "/workspace",
+      "platform": "linux",
+      "is_git_repo": true
+    }
+  }
+}
+```
+
+This is a configuration fragment to merge into the existing `upstream` object, not a complete configuration. An absent or empty object preserves the previous host-based behavior. A nonempty `working_directory` also supplies the workspace root unless `workspace_root` is set separately; omitted values otherwise keep their existing defaults, including `is_git_repo: true`. Supported platforms are `linux`, `darwin`, and `win32` (`windows` is normalized to `win32`). An explicit platform also selects the corresponding shell-tool description; the gateway does not execute or translate client commands. Paths are used as text, not resolved or accessed, and control characters, line separators, and angle brackets are rejected. These are operator-supplied compatibility values, not automatically detected client facts: use separate gateway configurations when clients require different environments. The requested model and UTC date remain unchanged. Arbitrary overrides, including the macOS description, have not been verified against upstream validation.
+
 Injection is protocol-aware: Chat system and developer messages are folded into one leading `system` message, Anthropic receives a `system` value (a string, or a leading text block when the caller sent blocks), and Responses receives `instructions`. A body whose system content already contains the marker `You are opencode, an interactive CLI tool` is passed through, so a client that sends the official prompt never gets a second copy. Free models served by a Zen or Go key receive the same shaping even though they still leave through that tier's proxy.
+
+The override applies only to the gateway-injected block; a client's existing official prompt is left untouched. It is shared by anonymous, keyed, WARP, and probe shaping, and is preserved when saving other settings through the WebUI. Edit the JSON configuration and reload it to change these advanced values; no dedicated WebUI fields are provided.
 
 ### Tool shaping
 
-Client-declared `edit` tools (case-insensitive) use the lane's official OpenCode description on shaped free-model requests. Their parameter schemas, other fields, and tool-name round-trip mapping are preserved. This applies to Chat, Responses, Anthropic, and legacy `functions` declarations; other tool descriptions retain the client's wording.
+Client-declared `edit` tools (name compared case-insensitively) use the lane's official OpenCode description on shaped free-model requests; their parameter schema and other fields are preserved, and the usual tool-name round-trip mapping still applies. This covers Chat, Responses, Anthropic, and legacy `functions` declarations; every other tool keeps the client's wording.
 
-Every shaped free-model request starts with the complete official tool set: 11 tools for the 1.x `/zen` lane and 12 tools for the 2.x `/inference` and `/zen/go` lanes. A client declaration whose entire definition (name, description, schema, strict flag, and other fields) matches an official tool reuses that entry without duplication. Other named client tools follow the official set in client order, renamed to `clnt_` plus the first 24 hex characters of the name's SHA-256 (collisions get a `_2`, `_3`, … suffix). Exact matching happens before `edit` description normalization; matching only the description does not qualify for reuse. The digest is not cosmetic: the free tier refuses a shaped body that still carries another client's vocabulary — a Claude Code request that declares both `ReportFindings` and `ScheduleWakeup` is answered with `FreeUsageLimitError`, and removing either name lifts the refusal — so no client tool name reaches the wire. Requests without a `tools` array, with an empty one, or with a legacy `functions` array get the same official set; `tool_choice`, legacy `function_call`, and the tool-call history are rewritten to match. Responses built-in tools and Anthropic server tools are left untouched.
+On every shaped free-model request the gateway replaces each named client tool with an opaque wire name — a plain namespace prefix (`mcp_`) plus the first 24 hex characters of the client name's SHA-256 (collisions get a `_2`, `_3`, … suffix) — and appends the complete official tool set for the lane: the 11-tool 1.x definitions (`bash`, `edit`, `glob`, `grep`, `read`, `skill`, `task`, `todowrite`, `webfetch`, `websearch`, `write`) on `/zen`, and the 13-tool 2.x set on `/inference` and `/zen/go`. The prefix must stay a plain namespace a tool name could carry: the free tier refuses a prefix it has learned to recognise, so it must not become a gateway marker. The digest is not cosmetic: the free tier refuses a shaped body that still carries another client's vocabulary — a Claude Code request that declares both `ReportFindings` and `ScheduleWakeup` is answered with `FreeUsageLimitError`, and removing either name lifts the refusal — so no client tool name reaches the wire. Requests without a `tools` array, with an empty one, or with a legacy `functions` array get the same official set; `tool_choice`, legacy `function_call`, and the tool-call history are rewritten to match. Legacy `functions` definitions pass through the same single renaming step as modern tools, keeping definitions, named choices, history references, and response restoration consistent. Responses built-in tools and Anthropic server tools are left untouched.
 
 Responses are restored to client-declared names in streaming and non-streaming replies, including Chat tool names split across chunks. An official name is mapped when the client declared an equivalent tool; otherwise it remains unchanged in the response. In request history, unknown tool calls and official calls without a declared equivalent are removed with their paired results, and a named `tool_choice` targeting one of those dropped calls is removed too.
 
@@ -484,6 +509,16 @@ The server forces `stream: false`. Use `{"mode":"selected","tier":"zen","id":"KE
 **Both automatic and selected diagnostics preserve production key cooldowns, failure counts, proxy health, and bindings.** They still make real upstream requests, can consume provider quota, and appear in monitoring.
 
 After execution, the management endpoint returns HTTP 200 with the actual result in `ok`, `http_status`, `request_id`, `route`, and `response`. Selected-key results also include `selected_key` and `key_test`: `usable`, `rejected`, `rate_limited`, `transport_error`, `upstream_error`, `request_error`, or `unavailable`. Invalid management input, authentication, CSRF, and throttling retain their own HTTP error statuses.
+
+### Go subscription sign-in
+
+In **Models & Quota** (`/#model-quotas`), select **Sign in to Go in your browser**, open the displayed official OpenCode Device OAuth link, and enter the displayed `user_code`. Authorize the request you initiated; the WebUI schedules backend polling to complete sign-in. No token pasting, local credential-file import, or callback URL submission is required. If the account has multiple organizations, select the organization with the Go subscription in the WebUI.
+
+- The backend refreshes access credentials when needed and persists the connection in the local configuration (`go_subscription`). This includes access and refresh secrets: protect the configuration and its backups. These credentials are not sent to the WebUI.
+- **Disconnect** removes the gateway's saved connection, not the official OpenCode session. Manually configured `go_keys` are retained but are not fallback routes while OAuth is connected; disconnecting restores their existing routing. If sign-in becomes invalid, reconnect rather than relying on those keys as a fallback.
+- OAuth uses only confirmed official Go subscription routes, never a pay-as-you-go route as fallback. OAuth quota is currently shown as **unknown**; the gateway does not infer remaining allowance from models or request results. The existing usage endpoint remains available for manually configured Go keys.
+
+The implementation follows the upstream source snapshots [v2 `4617210822bdbb31e5749751afbfb4584ccedac8`](https://github.com/anomalyco/opencode/tree/4617210822bdbb31e5749751afbfb4584ccedac8) and [dev `7745079647b65036fe142e09ccd8623b25be1878`](https://github.com/anomalyco/opencode/tree/7745079647b65036fe142e09ccd8623b25be1878). Source compatibility and local checks are not a claim of live subscription validation; upstream authorization and routing can change. See the [management guide](docs/management.zh-CN.md) for lifecycle and management endpoints.
 
 ### Interface language
 

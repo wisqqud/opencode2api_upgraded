@@ -23,7 +23,7 @@ func shellRenames() *ToolRenames {
 }
 
 func TestClientToolWireNameUses24SHA256HexCharacters(t *testing.T) {
-	const want = "clnt_aa6e99885a69dcd170429df2"
+	const want = "mcp_aa6e99885a69dcd170429df2"
 	used := map[string]bool{}
 	if got := ClientToolWireName("exec_command", used); got != want {
 		t.Fatalf("ClientToolWireName(exec_command) = %q; want %q", got, want)
@@ -292,7 +292,7 @@ func TestRenameResponseToolRebuildsMangledWireName(t *testing.T) {
 func TestResolveLeavesUnknownHashNameAlone(t *testing.T) {
 	renames := shellRenames()
 	for _, name := range []string{
-		"clnt_deadbeef0000000000000000",
+		"mcp_deadbeef0000000000000000",
 		"clint_deadbeef0000000000000000",
 		"clit_deadbeef0000000000000000",
 	} {

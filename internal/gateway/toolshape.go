@@ -1,9 +1,10 @@
 package gateway
 
 import (
-	"bytes"
 	_ "embed"
 	"encoding/json"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -33,8 +34,8 @@ type opencodeToolDefinition struct {
 // because Go maps do not preserve it. Tool order is not validated upstream, but
 // keeping the captured order makes the wire body stable.
 var v2OfficialToolOrder = []string{
-	"edit", "glob", "grep", "question", "read", "shell", "skill",
-	"subagent", "webfetch", "websearch", "write", "execute",
+	"edit", "execute", "glob", "grep", "question", "read", "shell",
+	"skill", "subagent", "webfetch", "websearch", "write", "patch",
 }
 
 var (
@@ -132,25 +133,32 @@ func officialToolDefinition(name string, v1 bool) (opencodeToolDefinition, bool)
 	return definition, ok
 }
 
-// officialToolDescription applies the same captured wording and host substitutions
-// to appended official tools and normalized client edit tools.
-func officialToolDescription(name string, v1 bool) string {
+// officialDescription is the captured wording of one official tool with the
+// host-specific fragments rewritten for the reported platform and host, so the
+// shaped client advertises the machine it claims to run on.
+func officialDescription(name string, v1 bool, platform string) string {
 	description := "Agent tool " + name
 	if definition, ok := officialToolDefinition(name, v1); ok {
 		description = definition.Description
 	}
-	return hostToolDescription(name, description, v1)
+	if v1 {
+		if name == "bash" {
+			description = v1BashDescription(description, platform)
+		}
+	} else if name == "shell" {
+		description = v2ShellDescription(description, platform)
+	}
+	return strings.ReplaceAll(description, "`/tmp/opencode`", "`"+hostTempDir()+"`")
 }
 
-// officialTool renders one official definition in the protocol's wire shape.
-// The 2.x Chat tools carry strict:false, while the captured 1.x tools omit it.
-func officialTool(protocol wire.Protocol, name string, v1 bool) map[string]any {
-	description := officialToolDescription(name, v1)
+// officialTool renders one official definition in the wire shape the protocol
+// expects. The 2.x Chat shape marks every tool strict:false, as the client does;
+// the captured 1.x entries carry no strict field and are rendered verbatim.
+func officialTool(protocol wire.Protocol, name string, v1 bool, platform string) map[string]any {
+	description := officialDescription(name, v1, platform)
 	parameters := map[string]any{"type": "object", "properties": map[string]any{}}
-	if definition, ok := officialToolDefinition(name, v1); ok {
-		if definition.Parameters != nil {
-			parameters = definition.Parameters
-		}
+	if definition, ok := officialToolDefinition(name, v1); ok && definition.Parameters != nil {
+		parameters = definition.Parameters
 	}
 	switch protocol {
 	case wire.Chat:
@@ -180,41 +188,71 @@ func officialTool(protocol wire.Protocol, name string, v1 bool) map[string]any {
 }
 
 // officialToolset renders the full official set for a lane.
-func officialToolset(protocol wire.Protocol, v1 bool) []any {
+func officialToolset(protocol wire.Protocol, v1 bool, platform string) []any {
 	names := officialToolNames(v1)
 	tools := make([]any, 0, len(names))
 	for _, name := range names {
-		tools = append(tools, officialTool(protocol, name, v1))
+		tools = append(tools, officialTool(protocol, name, v1, platform))
 	}
 	return tools
 }
 
-// hostToolDescription rewrites the host-specific fragments of the official
-// bash (1.x) and shell (2.x) definitions. Both clients describe the machine
-// they run on — the OS, the login shell and the temp directory handed to the
-// agent — so a gateway that shipped the Linux wording would advertise a
-// different host than the client it claims to be.
-func hostToolDescription(name, description string, v1 bool) string {
-	switch {
-	case v1 && name == "bash":
-		description = strings.Replace(description,
-			"OS: linux, Shell: bash",
-			"OS: "+hostPlatform()+", Shell: "+hostShell(), 1)
-	case !v1 && name == "shell":
-		if prefix, rest, ok := strings.Cut(description, "Commands run on "); ok {
-			if _, tail, ok := strings.Cut(rest, "."); ok {
-				description = prefix + "Commands run on " + hostPlatformTitle() + " using " + hostShell() + "." + tail
-			}
-		}
+// v2ShellDescription renders the configured platform's shell description,
+// retaining the host-based behavior when no platform override is supplied.
+var v2ShellSentence = regexp.MustCompile(`Commands run on [^.\n]* using [^.\n]+\.`)
+
+// platformShell names the host the CLI claims to run on. Only the exact
+// platform strings a client reports are mapped; anything else leaves the
+// captured description alone.
+func platformShell(platform string) (title, shell string, ok bool) {
+	if platform == "" {
+		platform = runtime.GOOS
 	}
-	return strings.ReplaceAll(description, "`/tmp/opencode`", "`"+hostTempDir()+"`")
+	switch platform {
+	case "win32", "windows":
+		return "Windows", "powershell", true
+	case "darwin":
+		return "macOS", "zsh", true
+	case "linux":
+		return "Linux", "bash", true
+	}
+	return "", "", false
 }
 
-// renameAndCompleteTools puts the lane's official set first, reuses exactly
-// matching client definitions, and follows it with opaque aliases for the other
-// client tools. Legacy functions are converted before matching and renaming.
-// The returned map restores client names in responses and keeps history aligned.
-func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 bool) (*wire.ToolRenames, bool) {
+func v2ShellDescription(base, platform string) string {
+	title, shell, ok := platformShell(platform)
+	if !ok {
+		return base
+	}
+	return v2ShellSentence.ReplaceAllString(base, "Commands run on "+title+" using "+shell+".")
+}
+
+// v1BashDescription applies the same platform rewrite to the 1.x bash
+// definition, which states its OS and shell inline.
+var v1ShellSentence = regexp.MustCompile(`Be aware: OS: [^,\n]+, Shell: [^.\n]+`)
+
+func v1BashDescription(base, platform string) string {
+	if platform == "" {
+		platform = runtime.GOOS
+	}
+	osName, shell := "linux", "bash"
+	switch platform {
+	case "win32", "windows":
+		osName, shell = "windows", "powershell"
+	case "darwin":
+		osName, shell = "darwin", "zsh"
+	case "linux":
+	default:
+		return base
+	}
+	return v1ShellSentence.ReplaceAllString(base, "Be aware: OS: "+osName+", Shell: "+shell)
+}
+
+// renameAndCompleteTools makes the tool list read as an official CLI session:
+// every named client tool is renamed to an opaque wire name, legacy functions
+// arrays are converted, and the full official set for the lane is appended.
+// The returned map restores the client names in the upstream response.
+func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 bool, platform string) (*wire.ToolRenames, bool) {
 	switch protocol {
 	case wire.Chat, wire.Responses, wire.Anthropic:
 	default:
@@ -228,22 +266,35 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 			items = list
 		}
 	}
+	declaredNames := make([]string, 0, len(items))
+	declaredParams := make(map[string]map[string]any, len(items))
+	for _, item := range items {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, ok := renamableToolName(protocol, entry); ok {
+			declaredNames = append(declaredNames, name)
+			if params := toolParameterNames(protocol, entry); len(params) > 0 {
+				declaredParams[name] = params
+			}
+		}
+	}
 	if protocol == wire.Chat || protocol == wire.Responses {
 		if legacy, ok := payload["functions"].([]any); ok {
+			for _, rawEntry := range legacy {
+				entry, ok := rawEntry.(map[string]any)
+				if ok {
+					if name := jsonutil.StringAt(entry, "name"); name != "" {
+						declaredNames = append(declaredNames, name)
+					}
+				}
+			}
 			items = append(items, convertLegacyFunctions(legacy, protocol)...)
 			delete(payload, "functions")
 		}
 	}
-	shaped := officialToolset(protocol, v1)
-	canonical := make(map[string]map[string]any, len(shaped))
-	for _, raw := range shaped {
-		entry := raw.(map[string]any)
-		name, _ := renamableToolName(protocol, entry)
-		canonical[name] = entry
-		used[name] = true
-	}
-	declaredNames := make([]string, 0, len(items))
-	declaredParams := make(map[string]map[string]any, len(items))
+	shaped := make([]any, 0, len(items)+len(officialToolNames(v1)))
 	for _, item := range items {
 		entry, ok := item.(map[string]any)
 		if !ok {
@@ -255,25 +306,15 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 			shaped = append(shaped, item)
 			continue
 		}
-		declaredNames = append(declaredNames, name)
-		if params := toolParameterNames(protocol, entry); len(params) > 0 {
-			declaredParams[name] = params
-		}
-		// Match the original complete declaration before edit normalization:
-		// a schema, strict flag or description difference still needs an alias.
-		if official, exists := canonical[name]; exists && sameToolDefinition(entry, official) {
-			renames.Add(name, name)
-			renames.BindOfficial(name, name)
-			continue
-		}
 		if strings.EqualFold(name, "edit") {
-			setToolDescription(protocol, entry, officialToolDescription("edit", v1))
+			setToolDescription(protocol, entry, officialDescription("edit", v1, platform))
 		}
 		if wireName := clientWireName(renames, used, name); wireName != name {
 			setToolName(protocol, entry, wireName)
 		}
 		shaped = append(shaped, entry)
 	}
+	shaped = append(shaped, officialToolset(protocol, v1, platform)...)
 	payload["tools"] = shaped
 	officialNames := officialToolNames(v1)
 	bindOfficialToolAliases(renames, declaredNames, declaredParams, officialNames, v1)
@@ -286,18 +327,6 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 	sanitizeToolHistory(payload, protocol, declared, renames, officialToolNameSet(v1))
 	rewriteToolReferences(payload, protocol, renames)
 	return renames, true
-}
-
-// sameToolDefinition compares complete JSON objects, ignoring object key order.
-// Encoding also normalizes Go slice/number representations from embedded assets
-// and decoded requests; extra fields and array order remain significant.
-func sameToolDefinition(client, official map[string]any) bool {
-	left, err := jsonutil.Marshal(client)
-	if err != nil {
-		return false
-	}
-	right, err := jsonutil.Marshal(official)
-	return err == nil && bytes.Equal(left, right)
 }
 
 func bindOfficialToolAliases(renames *wire.ToolRenames, declaredNames []string, declaredParams map[string]map[string]any, officialNames []string, v1 bool) {
@@ -647,8 +676,7 @@ func setToolName(protocol wire.Protocol, entry map[string]any, name string) {
 	entry["name"] = name
 }
 
-// setToolDescription replaces the description while preserving the client's
-// tool name, schema, strict flag and any other protocol-specific fields.
+// setToolDescription writes the description into one tool definition in place.
 func setToolDescription(protocol wire.Protocol, entry map[string]any, description string) {
 	if protocol == wire.Chat {
 		if function, ok := entry["function"].(map[string]any); ok {
@@ -660,7 +688,7 @@ func setToolDescription(protocol wire.Protocol, entry map[string]any, descriptio
 }
 
 // convertLegacyFunctions turns the pre-tools "functions" array into entries of
-// the protocol's tool shape. The common shaping loop normalizes and renames them.
+// the protocol's tool shape for the shared renaming pass.
 func convertLegacyFunctions(entries []any, protocol wire.Protocol) []any {
 	converted := make([]any, 0, len(entries))
 	for _, raw := range entries {

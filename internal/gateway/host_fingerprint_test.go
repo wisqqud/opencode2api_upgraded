@@ -24,7 +24,7 @@ func TestV2ChangedToolsMatchOpenCode230(t *testing.T) {
 	}
 	for name, want := range captured {
 		t.Run(name, func(t *testing.T) {
-			got := officialTool(wire.Chat, name, false)["function"].(map[string]any)
+			got := officialTool(wire.Chat, name, false, "linux")["function"].(map[string]any)
 			if got["description"] != want.Description || !reflect.DeepEqual(got["parameters"], want.Parameters) {
 				t.Errorf("%s differs from the official 2.3.0 description or schema", name)
 			}
@@ -63,22 +63,16 @@ func TestWorktreeRootMatchesV2Workspace(t *testing.T) {
 	}
 }
 
-func TestV2ShellDescriptionMatchesHost(t *testing.T) {
-	platform, shell := hostPlatform, hostShell
-	t.Cleanup(func() { hostPlatform, hostShell = platform, shell })
+func TestV2ShellDescriptionMatchesPlatform(t *testing.T) {
 	loadOfficialTools()
-	definition := opencodeToolsV2["shell"]
-	for _, tc := range []struct{ platform, shell, title string }{
-		{"linux", "bash", "Linux"},
-		{"darwin", "zsh", "macOS"},
-		{"win32", "powershell", "Windows"},
+	for _, tc := range []struct{ platform, want string }{
+		{"linux", "on Linux using bash"},
+		{"darwin", "on macOS using zsh"},
+		{"win32", "on Windows using powershell"},
 	} {
-		hostPlatform = func() string { return tc.platform }
-		hostShell = func() string { return tc.shell }
-		got := hostToolDescription("shell", definition.Description, false)
-		want := "Commands run on " + tc.title + " using " + tc.shell + "."
-		if !strings.Contains(got, want) {
-			t.Fatalf("%s shell description lacks %q: %q", tc.platform, want, got)
+		got := officialDescription("shell", false, tc.platform)
+		if !strings.Contains(got, tc.want) {
+			t.Fatalf("%s shell description lacks %q: %q", tc.platform, tc.want, got)
 		}
 	}
 }

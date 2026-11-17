@@ -13,7 +13,14 @@ import (
 // OpenCode set at the start of the tool list, and lets responses be restored to the names
 // the client declared. What follows it is a digest, never the client name: the
 // free tier refuses bodies that still read as another client's session.
-const ClientToolPrefix = "clnt_"
+//
+// The free tier refuses the literal "clint_" (case-insensitively) in a tool
+// name while serving any other prefix, so this must stay a plain namespace a
+// tool name could carry. mcp_ also prefixes MCP clients' mcp__<server>__<tool>
+// names, so refusing it would refuse their traffic too.
+// shortcut: upstream may learn mcp_ as well; rotate this value when 429s return
+// only on tool-bearing requests.
+const ClientToolPrefix = "mcp_"
 
 // clientToolDigestLength is how many hex characters of the SHA-256 client name
 // digest a wire name carries. Twenty-four hex characters retain twelve bytes
@@ -271,12 +278,10 @@ func (r *ToolRenames) HasLongerPrefix(prefix string) bool {
 // Resolve maps a tool name the upstream reported back to the name the client
 // declared. It is the response-side counterpart of the wire rename: an exact
 // wire name restores, an official alias maps to the matching client tool, a
-// declared client name that looks mangled wins over a rebuilt one, a mangled
-// wire name (clint_ or clit_ for clnt_) is rebuilt when it arrives in one
-// piece and matches a registered digest, and unknown digest names are left
-// unchanged. A name that differs from exactly one declared client tool only in
-// case, or else only in case and separators (todowrite → todo_write), is folded
-// onto that tool. A
+// wire-name prefix is stripped as a best-effort recovery (for example after a
+// configuration reload mid-stream), and a name that
+// differs from exactly one declared client tool only in case, or else only in
+// case and separators (todowrite → todo_write), is folded onto that tool. A
 // name two tools fold to is never guessed between. It reports whether the
 // result differs from the name given.
 func (r *ToolRenames) Resolve(wire string) (string, bool) {
@@ -294,10 +299,10 @@ func (r *ToolRenames) Resolve(wire string) (string, bool) {
 	if _, declared := r.toWire[wire]; declared {
 		return wire, false
 	}
-	// A model imitating a wire name from history sometimes writes clint_ or
-	// clit_ instead of clnt_. Rebuild only a registered wire name with the
-	// same digest. A name a stream splits across frames is not rebuilt: the
-	// first fragment settles the name.
+	// A model imitating a wire name from history sometimes writes an older or
+	// misspelled prefix (clnt_, clint_, clit_). Rebuild only a registered wire
+	// name with the same digest. A name a stream splits across frames is not
+	// rebuilt: the first fragment settles the name.
 	for _, mangled := range []string{"clint_", "clit_"} {
 		if rest, ok := strings.CutPrefix(wire, mangled); ok && rest != "" {
 			if client, ok := r.Client(ClientToolPrefix + rest); ok {

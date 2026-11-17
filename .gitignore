@@ -30,6 +30,7 @@ logs/
 coverage.out
 *.test
 *.test.exe
+test/
 
 # Scratch and temporary files
 .tmp/

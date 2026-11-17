@@ -142,13 +142,13 @@ func opencodeEnvironmentV1(model string) string {
 // block names the temp directory the client pre-created instead of the date,
 // and a note about moving the session to a worktree follows it. The 2.x client
 // also names no model, because its skills listing already precedes this text.
-func renderEnvironmentV2(workDir, root, repo string) string {
+func renderEnvironmentV2(workDir, root, repo, platform string) string {
 	return "\nToday's date: " + today() +
 		"\n\nHere is some useful information about the environment you are running in:\n<env>\n" +
 		"  Working directory: " + workDir + "\n" +
 		"  Workspace root folder: " + root + "\n" +
 		"  Is directory a git repo: " + repo + "\n" +
-		"  Platform: " + hostPlatform() + "\n" +
+		"  Platform: " + platform + "\n" +
 		"  Prefer " + hostTempDir() + " over generic system temporary directories such as /tmp; it is pre-created and approved for external access.\n" +
 		"</env>\n" +
 		"When you create a worktree outside the current working directory and intend to use it as your primary working directory, consider using `execute` to call `tools.opencode.session_move` and make the worktree the session's working directory."
@@ -157,14 +157,14 @@ func renderEnvironmentV2(workDir, root, repo string) string {
 // opencodeEnvironmentV2 renders the 2.x tail for the host paths.
 func opencodeEnvironmentV2() string {
 	opencodeEnvOnce.Do(resolveHostPaths)
-	return renderEnvironmentV2(opencodeWorkDir, opencodeRootDir, repoFlag())
+	return renderEnvironmentV2(opencodeWorkDir, opencodeRootDir, repoFlag(), hostPlatform())
 }
 
 // opencodeEnvironmentV2For renders the 2.x tail for a project detected in the
 // client's own system prompt, so the block is honest about where the client
 // really runs even though the gateway runs elsewhere.
 func opencodeEnvironmentV2For(environment promptEnvironment) string {
-	return renderEnvironmentV2(environment.WorkDir, environment.Workspace, environment.GitRepo)
+	return renderEnvironmentV2(environment.WorkDir, environment.Workspace, environment.GitRepo, environmentPlatform(environment))
 }
 
 // resolveHostPaths resolves the working directory, its git worktree root and
@@ -254,6 +254,7 @@ type promptEnvironment struct {
 	WorkDir   string
 	Workspace string
 	GitRepo   string
+	Platform  string
 }
 
 var (
@@ -266,7 +267,7 @@ var (
 // in. DSH and the OpenCode CLIs put it in their system prompt; using it keeps
 // the injected environment honest even though the gateway runs elsewhere.
 func detectPromptEnvironment(text string) promptEnvironment {
-	environment := promptEnvironment{}
+	environment := promptEnvironment{Platform: hostPlatform()}
 	if match := promptWorkDirPattern.FindStringSubmatch(text); match != nil {
 		environment.WorkDir = cleanPromptPath(match[1])
 	}
@@ -288,6 +289,41 @@ func detectPromptEnvironment(text string) promptEnvironment {
 	}
 	if environment.GitRepo == "" {
 		environment.GitRepo = detectGitRepo(environment.WorkDir)
+	}
+	return environment
+}
+
+// environmentPlatform is the platform line of the <env> block: the detected
+// value when the client reported one, the host platform otherwise.
+func environmentPlatform(environment promptEnvironment) string {
+	if environment.Platform != "" {
+		return environment.Platform
+	}
+	return hostPlatform()
+}
+
+// applyPromptEnvironment overlays the configured downstream.prompt_environment
+// values on a detected environment, so an operator can pin the directory,
+// workspace root, platform or repository flag the shaped client reports.
+func applyPromptEnvironment(environment promptEnvironment, override *config.PromptEnvironmentConfig) promptEnvironment {
+	if override == nil {
+		return environment
+	}
+	if override.WorkingDirectory != "" {
+		environment.WorkDir = override.WorkingDirectory
+		environment.Workspace = override.WorkingDirectory
+	}
+	if override.WorkspaceRoot != "" {
+		environment.Workspace = override.WorkspaceRoot
+	}
+	if override.Platform != "" {
+		environment.Platform = override.Platform
+	}
+	if override.IsGitRepo != nil {
+		environment.GitRepo = "no"
+		if *override.IsGitRepo {
+			environment.GitRepo = "yes"
+		}
 	}
 	return environment
 }
@@ -334,7 +370,7 @@ func renderPromptTemplate(template, model string, environment promptEnvironment)
 		"{{cwd}}", environment.WorkDir,
 		"{{workspace}}", environment.Workspace,
 		"{{git}}", environment.GitRepo,
-		"{{platform}}", hostPlatform(),
+		"{{platform}}", environmentPlatform(environment),
 		"{{date}}", today(),
 	)
 	return replacer.Replace(template)
@@ -355,7 +391,8 @@ func promptModel(model string) string {
 // listing, while 2.x lists the skills first and then the date, the environment
 // and the worktree note. A part with its Custom flag keeps the operator's text
 // instead of the built-in wording.
-func opencodeSystemPrompt(model string, v1 bool, cfg config.PromptConfig, environment promptEnvironment) string {
+func opencodeSystemPrompt(model string, v1 bool, cfg config.PromptConfig, environment promptEnvironment, override *config.PromptEnvironmentConfig) string {
+	environment = applyPromptEnvironment(environment, override)
 	apiModel := promptModel(model)
 	if v1 {
 		base := opencodePromptV1Windows
@@ -400,18 +437,18 @@ func opencodeSystemPrompt(model string, v1 bool, cfg config.PromptConfig, enviro
 // already carries the marker is left untouched, so repeated shaping cannot
 // duplicate the prompt. System One payloads are not chat bodies and are never
 // touched.
-func injectOfficialPrompt(payload map[string]any, protocol wire.Protocol, v1 bool, cfg config.PromptConfig) bool {
+func injectOfficialPrompt(payload map[string]any, protocol wire.Protocol, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
 	if payload == nil || cfg.Disabled || protocol == wire.SystemOne {
 		return false
 	}
 	model, _ := payload["model"].(string)
 	switch protocol {
 	case wire.Chat:
-		return injectChatPrompt(payload, model, v1, cfg)
+		return injectChatPrompt(payload, model, v1, cfg, override)
 	case wire.Anthropic:
-		return injectAnthropicPrompt(payload, model, v1, cfg)
+		return injectAnthropicPrompt(payload, model, v1, cfg, override)
 	case wire.Responses:
-		return injectResponsesPrompt(payload, model, v1, cfg)
+		return injectResponsesPrompt(payload, model, v1, cfg, override)
 	default:
 		return false
 	}
@@ -422,7 +459,7 @@ func injectOfficialPrompt(payload map[string]any, protocol wire.Protocol, v1 boo
 // environment is detected first, so its project replaces the gateway's
 // directory. Client instructions keep their order and are separated from the
 // official prompt by a blank line.
-func injectChatPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig) bool {
+func injectChatPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
 	messages, ok := payload["messages"].([]any)
 	if !ok {
 		return false
@@ -451,7 +488,7 @@ func injectChatPrompt(payload map[string]any, model string, v1 bool, cfg config.
 		}
 	}
 	client := strings.Join(instructions, "\n")
-	system := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(client))
+	system := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(client), override)
 	if client != "" {
 		system += "\n\n" + client
 	}
@@ -461,12 +498,12 @@ func injectChatPrompt(payload map[string]any, model string, v1 bool, cfg config.
 
 // injectAnthropicPrompt prepends the prompt to the top-level system value,
 // keeping a caller's string or block list intact after it.
-func injectAnthropicPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig) bool {
+func injectAnthropicPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
 	system, exists := payload["system"]
 	if exists && carriesOpenCodePrompt(system) {
 		return false
 	}
-	prompt := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(system), "\n")))
+	prompt := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(system), "\n")), override)
 	if !exists {
 		payload["system"] = prompt
 		return true
@@ -487,12 +524,12 @@ func injectAnthropicPrompt(payload map[string]any, model string, v1 bool, cfg co
 }
 
 // injectResponsesPrompt prepends the prompt to the Responses instructions.
-func injectResponsesPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig) bool {
+func injectResponsesPrompt(payload map[string]any, model string, v1 bool, cfg config.PromptConfig, override *config.PromptEnvironmentConfig) bool {
 	instructions, exists := payload["instructions"]
 	if exists && carriesOpenCodePrompt(instructions) {
 		return false
 	}
-	prompt := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(instructions), "\n")))
+	prompt := opencodeSystemPrompt(model, v1, cfg, detectPromptEnvironment(strings.Join(textFragments(instructions), "\n")), override)
 	if text, ok := instructions.(string); exists && ok {
 		if strings.TrimSpace(text) == "" {
 			payload["instructions"] = prompt
