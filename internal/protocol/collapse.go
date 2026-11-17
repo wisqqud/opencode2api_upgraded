@@ -153,3 +153,13 @@ func (acc *collapseAccumulator) toolBlock(key, id, name string) *bridgeBlock {
 	acc.tools[key] = len(acc.response.Tools) - 1
 	return &acc.response.Tools[len(acc.response.Tools)-1]
 }
+
+// firstNonEmpty returns the first non-empty string, or "".
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
