@@ -296,7 +296,16 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 			delete(payload, "functions")
 		}
 	}
-	shaped := make([]any, 0, len(items)+len(officialToolNames(v1)))
+	officialSet := officialToolset(protocol, v1, platform)
+	canonical := make(map[string]map[string]any, len(officialSet))
+	for _, raw := range officialSet {
+		entry, _ := raw.(map[string]any)
+		name, _ := renamableToolName(protocol, entry)
+		if name != "" {
+			canonical[name] = entry
+		}
+	}
+	shaped := make([]any, 0, len(items)+len(officialSet))
 	for _, item := range items {
 		entry, ok := item.(map[string]any)
 		if !ok {
@@ -308,6 +317,18 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 			shaped = append(shaped, item)
 			continue
 		}
+		// Reuse exact official declarations and the authoritative read/skill
+		// definitions. Other differing client declarations still need aliases.
+		if official, exists := canonical[name]; exists {
+			if sameToolDefinition(entry, official) || isAuthoritativeClientDuplicate(name) {
+				renames.Add(name, name)
+				renames.BindOfficial(name, name)
+				if mapping := officialArgRemap(name, declaredParams[name], v1); len(mapping) > 0 {
+					renames.BindOfficialArgs(name, mapping)
+				}
+				continue
+			}
+		}
 		if strings.EqualFold(name, "edit") {
 			setToolDescription(protocol, entry, officialDescription("edit", v1, platform))
 		}
@@ -316,7 +337,7 @@ func renameAndCompleteTools(payload map[string]any, protocol wire.Protocol, v1 b
 		}
 		shaped = append(shaped, entry)
 	}
-	shaped = append(shaped, officialToolset(protocol, v1, platform)...)
+	shaped = append(shaped, officialSet...)
 	payload["tools"] = shaped
 	officialNames := officialToolNames(v1)
 	bindOfficialToolAliases(renames, declaredNames, declaredParams, officialNames, v1)
@@ -418,6 +439,17 @@ func appendExecutableToolPrompt(payload map[string]any, protocol wire.Protocol, 
 	}
 }
 
+// isAuthoritativeClientDuplicate reports client tools whose official gateway
+// definitions must remain the sole wire declarations.
+func isAuthoritativeClientDuplicate(name string) bool {
+	switch strings.ToLower(name) {
+	case "read", "skill":
+		return true
+	default:
+		return false
+	}
+}
+
 // sameToolDefinition compares complete JSON objects, ignoring object key order.
 // Encoding also normalizes Go slice/number representations from embedded assets
 // and decoded requests; extra fields and array order remain significant.
@@ -457,15 +489,15 @@ func bindOfficialToolAliases(renames *wire.ToolRenames, declaredNames []string, 
 // as an official argument the client spells differently. Only a rename is
 // listed: an official argument the client does not declare is dropped, because
 // the client tool schema rejects fields it does not know.
-var officialArgAliases = map[string]map[string]string{
-	"bash":     {"command": "cmd"},
-	"shell":    {"command": "cmd"},
-	"execute":  {"command": "cmd"},
-	"read":     {"path": "file_path", "filePath": "file_path"},
-	"edit":     {"path": "file_path", "filePath": "file_path", "oldString": "old_string", "newString": "new_string", "replaceAll": "replace_all"},
-	"write":    {"path": "file_path", "filePath": "file_path"},
-	"skill":    {"id": "skill", "name": "skill"},
-	"subagent": {"agent": "subagent_type"},
+var officialArgAliases = map[string]map[string][]string{
+	"bash":     {"command": {"cmd"}},
+	"shell":    {"command": {"cmd"}},
+	"execute":  {"command": {"cmd"}},
+	"read":     {"path": {"file_path"}, "filePath": {"file_path"}},
+	"edit":     {"path": {"file_path"}, "filePath": {"file_path"}, "oldString": {"old_string"}, "newString": {"new_string"}, "replaceAll": {"replace_all"}},
+	"write":    {"path": {"file_path"}, "filePath": {"file_path"}},
+	"skill":    {"id": {"name", "skill"}, "name": {"skill"}},
+	"subagent": {"agent": {"subagent_type"}},
 }
 
 // officialArgRemap builds the argument mapping from one official tool to the
@@ -486,16 +518,17 @@ func officialArgRemap(official string, clientParams map[string]any, v1 bool) map
 	}
 	mapping := make(map[string]string, len(properties))
 	changed := false
+propertiesLoop:
 	for name := range properties {
 		if _, ok := clientParams[name]; ok {
 			mapping[name] = name
 			continue
 		}
-		if alias := officialArgAliases[official][name]; alias != "" {
+		for _, alias := range officialArgAliases[official][name] {
 			if _, ok := clientParams[alias]; ok {
 				mapping[name] = alias
 				changed = true
-				continue
+				continue propertiesLoop
 			}
 		}
 		mapping[name] = ""

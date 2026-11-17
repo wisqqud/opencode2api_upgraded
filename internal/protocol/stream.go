@@ -661,6 +661,7 @@ func (renamer *streamToolRenamer) applyNameFragment(state *streamToolRenameState
 	if client, ok := renamer.renames.Client(state.pending); ok {
 		function["name"] = client
 		state.decided, state.renamed, state.resolved = true, true, client
+		state.argMapping, _ = renamer.renames.OfficialArgs(state.pending)
 		return true
 	}
 	if renamer.renames.HasLongerPrefix(state.pending) {

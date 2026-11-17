@@ -27,13 +27,17 @@ func TestShapeAppendsOfficialSetAfterClientTools(t *testing.T) {
 			if err := json.Unmarshal(data, &client); err != nil {
 				t.Fatal(err)
 			}
+			// The exact official "read"/"skill" declarations are reused in
+			// place (see TestShapeDropsNoncanonicalReadAndSkillDuplicates), so a
+			// non-official caller tool exercises the appended-lane shape.
+			setToolName(protocol, client, "ReadFile")
 			payload := map[string]any{"tools": []any{client}}
 			if protocol == wire.Chat {
 				payload["messages"] = []any{
-					map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "c1", "type": "function", "function": map[string]any{"name": "read", "arguments": "{}"}}}},
+					map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "c1", "type": "function", "function": map[string]any{"name": "ReadFile", "arguments": "{}"}}}},
 					map[string]any{"role": "tool", "tool_call_id": "c1", "content": "done"},
 				}
-				payload["tool_choice"] = map[string]any{"type": "function", "function": map[string]any{"name": "read"}}
+				payload["tool_choice"] = map[string]any{"type": "function", "function": map[string]any{"name": "ReadFile"}}
 			}
 			renames, ok := renameAndCompleteTools(payload, protocol, v1, "linux")
 			if !ok {
@@ -49,9 +53,9 @@ func TestShapeAppendsOfficialSetAfterClientTools(t *testing.T) {
 					t.Fatalf("official set differs at %d", i)
 				}
 			}
-			wireName, ok := renames.Wire("read")
-			if !ok || !strings.HasPrefix(wireName, wire.ClientToolPrefix) || renames.Restore(wireName) != "read" {
-				t.Fatalf("client read wire name %q (ok=%v) does not round trip", wireName, ok)
+			wireName, ok := renames.Wire("ReadFile")
+			if !ok || !strings.HasPrefix(wireName, wire.ClientToolPrefix) || renames.Restore(wireName) != "ReadFile" {
+				t.Fatalf("client ReadFile wire name %q (ok=%v) does not round trip", wireName, ok)
 			}
 			if protocol == wire.Chat {
 				if len(payload["messages"].([]any)) != 2 || payload["tool_choice"] == nil {
@@ -78,6 +82,164 @@ func TestShapeRenamesClientToolsToMCPPrefix(t *testing.T) {
 	}
 	if renames.Restore(got) != "ReportFindings" {
 		t.Fatalf("round trip of %q = %q", got, renames.Restore(got))
+	}
+}
+
+func TestShapeDifferentDefinitionGetsAliasSuffix(t *testing.T) {
+	for _, change := range []string{"description", "schema", "strict", "extra"} {
+		t.Run(change, func(t *testing.T) {
+			data, _ := json.Marshal(officialTool(wire.Chat, "glob", false, ""))
+			var client map[string]any
+			if err := json.Unmarshal(data, &client); err != nil {
+				t.Fatal(err)
+			}
+			fn := client["function"].(map[string]any)
+			switch change {
+			case "description":
+				fn["description"] = "Client reader"
+			case "schema":
+				fn["parameters"] = map[string]any{"type": "object"}
+			case "strict":
+				delete(fn, "strict")
+			case "extra":
+				fn["custom"] = true
+			}
+			payload := map[string]any{"tools": []any{client}}
+			renames, _ := renameAndCompleteTools(payload, wire.Chat, false, "")
+			tools := payload["tools"].([]any)
+			n := len(officialToolNames(false))
+			if len(tools) != n+1 {
+				t.Fatal("noncanonical caller tool not retained")
+			}
+			got, _ := renamableToolName(wire.Chat, tools[0].(map[string]any))
+			if !strings.HasPrefix(got, wire.ClientToolPrefix) || len(got) != len(wire.ClientToolPrefix)+24 || renames.Restore(got) != "glob" {
+				t.Fatalf("bad alias or round trip: %s", got)
+			}
+			for i, name := range officialToolNames(false) {
+				got, _ := renamableToolName(wire.Chat, tools[i+1].(map[string]any))
+				if got != name {
+					t.Fatalf("suffix[%d]=%s want %s", i, got, name)
+				}
+			}
+		})
+	}
+}
+
+func TestShapeDropsNoncanonicalReadAndSkillDuplicates(t *testing.T) {
+	for _, protocol := range []wire.Protocol{wire.Chat, wire.Responses, wire.Anthropic} {
+		for _, v1 := range []bool{false, true} {
+			for _, name := range []string{"read", "skill"} {
+				clientKey := "name"
+				if name == "read" {
+					clientKey = "file_path"
+				}
+				params := map[string]any{"type": "object", "properties": map[string]any{clientKey: map[string]any{"type": "string"}}}
+				client := map[string]any{"name": name, "description": "Client wording that must not be forwarded", "parameters": params, "strict": true}
+				switch protocol {
+				case wire.Chat:
+					client = map[string]any{"type": "function", "function": client}
+				case wire.Responses:
+					client["type"] = "function"
+				case wire.Anthropic:
+					delete(client, "parameters")
+					client["input_schema"] = params
+				}
+				payload := map[string]any{"tools": []any{client, client}}
+				renames, ok := renameAndCompleteTools(payload, protocol, v1, "")
+				if !ok {
+					t.Fatal("renameAndCompleteTools reported no shaping")
+				}
+				tools := payload["tools"].([]any)
+				want := officialToolset(protocol, v1, "")
+				if len(tools) != len(want) {
+					t.Fatalf("%s v1=%v duplicate %s forwarded: got %d tools", protocol, v1, name, len(tools))
+				}
+				for i := range tools {
+					if !sameToolDefinition(tools[i].(map[string]any), want[i].(map[string]any)) {
+						t.Fatalf("%s v1=%v official definition[%d] changed", protocol, v1, i)
+					}
+				}
+				bound, ok := renames.Official(name)
+				if !ok || bound != name || !renames.AllowsResponseTool(name) {
+					t.Fatalf("%s v1=%v %s lost client binding", protocol, v1, name)
+				}
+				if got, ok := renames.Wire(name); !ok || got != name || renames.Count() != 0 {
+					t.Fatalf("duplicate allocated alias: %s -> %s", name, got)
+				}
+				sourceKey := "id"
+				if name == "read" {
+					sourceKey = "path"
+					if v1 {
+						sourceKey = "filePath"
+					}
+				} else if v1 {
+					sourceKey = "name"
+				}
+				mapping, _ := renames.OfficialArgs(name)
+				args := wire.RemapArguments(`{"`+sourceKey+`":"fixture"}`, mapping)
+				var decoded map[string]any
+				if err := json.Unmarshal([]byte(args), &decoded); err != nil || decoded[clientKey] != "fixture" || len(decoded) != 1 {
+					t.Fatalf("%s v1=%v %s mapping lost argument: %s", protocol, v1, name, args)
+				}
+			}
+		}
+	}
+}
+
+func TestShapeSkillArgumentAliases(t *testing.T) {
+	for _, clientKey := range []string{"id", "name", "skill"} {
+		for _, v1 := range []bool{false, true} {
+			if v1 && clientKey == "id" {
+				continue // Not a supported legacy client spelling.
+			}
+			mapping := officialArgRemap("skill", map[string]any{clientKey: map[string]any{"type": "string"}}, v1)
+			key := "id"
+			if v1 {
+				key = "name"
+			}
+			var got map[string]any
+			if err := json.Unmarshal([]byte(wire.RemapArguments(`{"`+key+`":"fixture"}`, mapping)), &got); err != nil || got[clientKey] != "fixture" {
+				t.Fatalf("v1=%v clientKey=%s mapping=%v result=%v", v1, clientKey, mapping, got)
+			}
+		}
+	}
+}
+
+func TestShapedReadAndSkillResponsesRestoreHarnessArguments(t *testing.T) {
+	for _, name := range []string{"read", "skill"} {
+		clientKey, officialKey := "name", "id"
+		if name == "read" {
+			clientKey, officialKey = "file_path", "path"
+		}
+		payload := map[string]any{"tools": []any{map[string]any{"type": "function", "function": map[string]any{
+			"name": name, "description": "Harness declaration", "parameters": map[string]any{
+				"type": "object", "properties": map[string]any{clientKey: map[string]any{"type": "string"}},
+			},
+		}}}}
+		renames, _ := renameAndCompleteTools(payload, wire.Chat, false, "")
+		for _, stream := range []bool{false, true} {
+			function := map[string]any{"name": name, "arguments": `{"` + officialKey + `":"fixture"}`}
+			message := map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": 0, "id": "call_1", "type": "function", "function": function}}}
+			key := "message"
+			if stream {
+				key = "delta"
+			}
+			frame, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, key: message}}})
+			var body []byte
+			if stream {
+				input := "data: " + string(frame) + "\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+				var err error
+				body, err = io.ReadAll(wire.RenameStreamReader(strings.NewReader(input), wire.Chat, renames))
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				body = wire.RenameResponseTool(frame, wire.Chat, renames)
+			}
+			if !strings.Contains(string(body), `"name":"`+name+`"`) || !strings.Contains(string(body), `\"`+clientKey+`\":\"fixture\"`) {
+				t.Fatalf("%s stream=%v lost executable Harness call: %s", name, stream, body)
+			}
+		}
 	}
 }
 
