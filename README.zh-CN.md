@@ -1,6 +1,8 @@
-# opencode2api
+# opencode2api_upgraded
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Tiếng Việt](README.vi.md) | [Italiano](README.it.md)
+
+本仓库是 [opencode2api](https://github.com/jasonxu114514/opencode2api)（作者 [jasonxu114514](https://github.com/jasonxu114514)）的社区 **mod**，保留上游网关并在此基础上增加下方列出的功能。
 
 使用 Go 编写的 **OpenCode Zen / Zen Go API 网关**。对外提供 Chat Completions、Responses 和 Anthropic Messages 接口，按上游原生协议转换请求，并统一管理上游 Key 与代理。
 
@@ -15,7 +17,7 @@ WebUI 内嵌在可执行文件中，运行服务无需 Node.js 或数据库。
 - 可选的用户态 Cloudflare WARP 出口，免费模型流量无需 TUN 或 root 权限。
 - 直连、HTTP、HTTPS、SOCKS5、SOCKS5H 连接，以及代理文件。
 - 动态模型发现、原生协议与能力信息、磁盘缓存。
-- 独立管理端口，支持配置编辑、Playground、路由诊断、Token 统计和实时日志。
+- 独立管理端口，支持配置编辑、聊天测试页、路由诊断、Token 统计和实时日志。
 - 配置热重载：先验证新配置，再切换新请求使用的 Gateway。
 - Go 共享套餐额度看板，显示剩余百分比、重置时间和可用模型。
 - API Key 生成、自定义、命名、启停和删除，变更立即生效。

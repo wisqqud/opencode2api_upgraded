@@ -1,6 +1,8 @@
-# opencode2api
+# opencode2api_upgraded
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Tiếng Việt](README.vi.md) | [Italiano](README.it.md)
+
+Đây là bản **mod** cộng đồng của [opencode2api](https://github.com/jasonxu114514/opencode2api), do [jasonxu114514](https://github.com/jasonxu114514) tạo ra; bản này giữ nguyên gateway gốc và bổ sung các tính năng bên dưới.
 
 Một gateway viết bằng Go cho **OpenCode Zen và Zen Go**. Nó cung cấp các endpoint Chat Completions, Responses và Anthropic Messages, chuyển đổi qua lại giữa các giao thức gốc của chúng, và quản lý upstream key cùng proxy.
 
@@ -15,7 +17,7 @@ File thực thi đã bao gồm WebUI. Việc chạy dịch vụ không cần Nod
 - Đầu ra Cloudflare WARP chạy trong tiến trình cho lưu lượng mô hình miễn phí, không cần TUN hay root.
 - Kết nối direct, HTTP, HTTPS, SOCKS5 và SOCKS5H, bao gồm cả file proxy.
 - Tự động phát hiện mô hình, metadata giao thức gốc và cache trên đĩa.
-- Cổng quản trị riêng với chỉnh sửa cấu hình, Playground, chẩn đoán, thống kê token và log trực tiếp.
+- Cổng quản trị riêng với chỉnh sửa cấu hình, trang chat thử nghiệm, chẩn đoán, thống kê token và log trực tiếp.
 - Nạp lại cấu hình nóng sau khi kiểm tra, trước khi chuyển request mới sang gateway thay thế.
 - Bảng hạn mức gói Go với phần trăm còn lại, thời điểm reset và danh sách mô hình khả dụng.
 - Tạo, đặt tên, bật, tắt và xoá API key cục bộ, có hiệu lực tức thì.

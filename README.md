@@ -1,14 +1,16 @@
-# opencode2api
+# opencode2api_upgraded
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Tiếng Việt](README.vi.md) | [Italiano](README.it.md)
+
+A community **mod** of [opencode2api](https://github.com/jasonxu114514/opencode2api), created by [jasonxu114514](https://github.com/jasonxu114514). This build keeps the upstream gateway and adds the extras listed below.
 
 A Go gateway for **OpenCode Zen and Zen Go**. It exposes Chat Completions, Responses, and Anthropic Messages endpoints, translates between their native protocols, and manages upstream keys and proxies.
 
 The executable includes the WebUI. Running the service requires no Node.js runtime or database.
 
-## Fork features
+## Mod features
 
-This fork of [jasonxu114514/opencode2api](https://github.com/jasonxu114514/opencode2api) keeps the upstream code and adds:
+This mod keeps the upstream code and adds:
 
 - **Statistic page** — durable daily token aggregates stored in `statistics.json`, with cumulative and peak tokens, useful sessions, day streaks, a twelve-month activity heatmap, a daily trend, and per-model lifetime usage.
 - **Chat test page** — `#chat` replaces the old Playground with a real streaming conversation through the Gateway: system prompt, saved conversation list, message editing, answer regeneration, protocol/model/key/relay selection, sampling and reasoning controls, request preview, and JSON export/import.

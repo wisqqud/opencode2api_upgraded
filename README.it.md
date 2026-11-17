@@ -1,6 +1,8 @@
-# opencode2api
+# opencode2api_upgraded
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Tiếng Việt](README.vi.md) | [Italiano](README.it.md)
+
+Questa è una **mod** della community di [opencode2api](https://github.com/jasonxu114514/opencode2api), creata da [jasonxu114514](https://github.com/jasonxu114514): mantiene il gateway originale e aggiunge le funzionalità elencate sotto.
 
 Gateway scritto in Go per **OpenCode Zen e Zen Go**. Espone gli endpoint Chat Completions, Responses e Anthropic Messages, traduce tra i rispettivi protocolli nativi e gestisce le chiavi upstream e i proxy.
 
@@ -15,7 +17,7 @@ L'eseguibile include la WebUI: per eseguire il servizio non servono Node.js né 
 - Uscita Cloudflare WARP in userspace per il traffico dei modelli gratuiti, senza TUN né root.
 - Connessioni dirette e tramite HTTP, HTTPS, SOCKS5 e SOCKS5H, anche da un file proxy.
 - Rilevamento dinamico dei modelli, metadati del protocollo nativo e cache su disco.
-- Porta di gestione separata con modifica della configurazione, Playground, diagnostica, statistiche dei token e log in tempo reale.
+- Porta di gestione separata con modifica della configurazione, pagina chat di prova, diagnostica, statistiche dei token e log in tempo reale.
 - Ricaricamento a caldo della configurazione, con convalida prima di passare le nuove richieste a un gateway sostitutivo.
 - Dashboard delle quote dell'abbonamento Go con percentuali residue, orari di reset e modelli disponibili.
 - Creazione, denominazione, abilitazione, disabilitazione ed eliminazione immediata di API key locali.
