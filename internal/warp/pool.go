@@ -502,7 +502,7 @@ func (p *Pool) replace(old *exit, reason string) {
 		return
 	}
 	if p.logger != nil {
-		p.logger.Infof("OpenCode WARP egress %s replaced by %s at %s (%s), active=%d", old.id, replacement.id, replacement.egress, reason, len(p.active))
+		p.logger.Infof("OpenCode WARP egress %s replaced by %s at %s (%s)", old.id, replacement.id, replacement.egress, reason)
 	}
 	old.retire()
 	p.startRefill()
@@ -624,10 +624,9 @@ func (p *Pool) released() {
 	}
 	closed := p.closed
 	wantRefill := !closed && len(p.active) < p.desiredLocked()
-	started := p.scaling
-	if !closed && !started && len(p.active) > p.desiredLocked() {
+	scheduleScaleDown := !closed && !p.scaling && len(p.active) > p.desiredLocked()
+	if scheduleScaleDown {
 		p.scaling = true
-		started = true
 	}
 	p.mu.Unlock()
 	if closed {
@@ -636,7 +635,7 @@ func (p *Pool) released() {
 	if wantRefill {
 		p.startRefill()
 	}
-	if started {
+	if scheduleScaleDown {
 		p.after(scaleDownDelay, p.scaleDown)
 	}
 }

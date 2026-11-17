@@ -227,7 +227,7 @@ func TestBridgeStreamFragmentsAndMixedCalls(t *testing.T) {
 	bad := strings.Replace(input.String(), `"name":"glob"`, `"name":"execute"`, 1)
 	w := httptest.NewRecorder()
 	_, _, err = TranscodeStream(context.Background(), w, RenameStreamReader(strings.NewReader(bad), Chat, shellBridgeRenames()), Chat, Responses, "m")
-	if err == nil || !strings.Contains(w.Body.String(), "execute") || strings.Contains(w.Body.String(), "response.completed") || strings.Contains(w.Body.String(), "function_call\"") {
+	if err == nil || !strings.Contains(w.Body.String(), "response.failed") || strings.Contains(w.Body.String(), "response.completed") || strings.Contains(w.Body.String(), "function_call\"") || strings.Contains(w.Body.String(), "execute") {
 		t.Fatalf("unsupported mixed call became success: %s %v", w.Body.String(), err)
 	}
 }
